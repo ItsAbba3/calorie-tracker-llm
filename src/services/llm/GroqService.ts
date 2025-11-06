@@ -50,19 +50,31 @@ class GroqService {
 
 ${foodsList}
 
+توجه مهم: اسکیمای دیتابیس (از این نام‌ها دقیقاً استفاده کن):
+- جدول foods: (name, calories_per_unit, unit, category, protein, carbs, fat)
+- جدول meal_entries: (user_id, food_name, quantity, unit, total_calories, raw_input, date, time)
+
+قواعد اضافه:
++- برای کالریِ واحدی از نام ستون 'calories_per_unit' استفاده کن (مثلاً 'foods.calories_per_unit' یا 'T1.calories_per_unit').
++- نامِ ستونِ نام غذا در جدول وعده‌ها 'food_name' است؛ 'foodname' یا 'foodName' نزن.
++- خروجی SQL باید یک عدد (مجموع کالری‌ها) برگرداند با نامی مثل 'total_calories' یا فقط مقدار اول.
++- اگر از ALIAS استفاده می‌کنی، از ستون‌های واقعی بالا استفاده کن (مثال: 'T1.calories_per_unit').
+
 کاربر این متن را وارد کرده:
 "${userInput}"
 
 وظایف تو:
 1. غذاهای ذکر شده را شناسایی کن (نام دقیق از لیست بالا)
 2. مقدار و واحد هر غذا را استخراج کن
-3. یک SQL query بنویس که کل کالری را محاسبه کند
+3. یک SQL query بنویس که کل کالری را محاسبه کند و از نام ستون‌های دقیق استفاده کند
 
-قوانین:
-- اگر کاربر واحد نگفته، از واحد پیش‌فرض دیتابیس استفاده کن
-- اگر کاربر عدد نگفته، مقدار را 1 فرض کن
-- برای تبدیل واحد، از منطق ریاضی استفاده کن (مثلاً "یک نان" = 4 × "¼ نان")
-- SQL باید SUM یا مجموع کالری‌ها را برگرداند
+مثال SQL خروجی (نمونه، برای الگو):
+SELECT SUM(T1.quantity * T1.calories_per_unit) AS total_calories
+FROM (
+  SELECT foods.calories_per_unit, ? AS quantity
+  FROM foods
+  WHERE foods.name = 'نان'
+) AS T1;
 
 فرمت خروجی (JSON خالص بدون markdown):
 {
@@ -73,6 +85,13 @@ ${foodsList}
   "explanation": "توضیح کوتاه"
 }
 `;
+
+    // Note: explicitly provide schema/column names so the model uses the exact column names
+    // available in the app's SQLite schema. This reduces column-name mismatches like "foodname".
+    // tables:
+    // - foods(name, calories_per_unit, unit, category, protein, carbs, fat)
+    // - meal_entries(food_name, quantity, unit, total_calories, raw_input, date, time, user_id)
+    // Instruct the model to use these exact names (use `name` for foods, `food_name` for meal entries).
 
     try {
       const completion = await this.client.chat.completions.create({

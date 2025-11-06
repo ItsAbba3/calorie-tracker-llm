@@ -21,6 +21,7 @@ type Props = {
 const OnboardingScreen: React.FC<Props> = ({ navigation }) => {
   // State
   const [step, setStep] = useState(1);
+  const [name, setName] = useState('');
   const [age, setAge] = useState('');
   const [gender, setGender] = useState<'male' | 'female'>('male');
   const [weight, setWeight] = useState('');
@@ -29,6 +30,11 @@ const OnboardingScreen: React.FC<Props> = ({ navigation }) => {
 
   // Validation
   const validateStep1 = (): boolean => {
+    if (!name.trim() || name.trim().length < 2) {
+      Alert.alert('خطا', 'لطفاً نام خود را وارد کنید');
+      return false;
+    }
+
     const ageNum = parseInt(age);
     if (!age || isNaN(ageNum) || ageNum < 10 || ageNum > 100) {
       Alert.alert('خطا', 'لطفاً سن خود را به درستی وارد کنید (10-100)');
@@ -74,6 +80,7 @@ const OnboardingScreen: React.FC<Props> = ({ navigation }) => {
   const handleFinish = async () => {
     try {
       const profile = {
+        name: name.trim(),
         age: parseInt(age),
         gender,
         weight: parseFloat(weight),
@@ -89,7 +96,7 @@ const OnboardingScreen: React.FC<Props> = ({ navigation }) => {
         [
           {
             text: 'شروع کنیم',
-            onPress: () => navigation.replace('Home'),
+            onPress: () => navigation.replace('Main'),
           },
         ]
       );

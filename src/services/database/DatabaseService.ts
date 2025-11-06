@@ -4,6 +4,7 @@ import { SAMPLE_FOODS_DATA } from '../../constants/database';
 
 export interface UserProfile {
   id: number;
+  name?: string;
   age: number;
   gender: 'male' | 'female';
   weight: number;
@@ -62,6 +63,7 @@ class DatabaseService {
     await this.db.execAsync(`
       CREATE TABLE IF NOT EXISTS user_profile (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT,
         age INTEGER NOT NULL,
         gender TEXT NOT NULL CHECK(gender IN ('male', 'female')),
         weight REAL NOT NULL,
@@ -107,6 +109,18 @@ class DatabaseService {
     await this.db.execAsync(`
       CREATE INDEX IF NOT EXISTS idx_meal_date ON meal_entries(date, user_id);
     `);
+
+    // تاریخچه وزن
+    await this.db.execAsync(`
+      CREATE TABLE IF NOT EXISTS weight_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        weight REAL NOT NULL,
+        date TEXT NOT NULL,
+        created_at TEXT DEFAULT (datetime('now', 'localtime')),
+        FOREIGN KEY (user_id) REFERENCES user_profile(id)
+      );
+    `);
   }
 
   private async seedInitialData(): Promise<void> {
@@ -137,15 +151,17 @@ class DatabaseService {
     }
   }
 
-  async saveUserProfile(profile: Omit<UserProfile, 'id' | 'created_at'>): Promise<number> {
+  async saveUserProfile(profile: Omit<UserProfile, 'id' | 'created_at' | 'daily_calorie_target'>): Promise<number> {
     if (!this.db) throw new Error('Database not initialized');
 
     const bmr = this.calculateBMR(profile.age, profile.gender, profile.weight, profile.height);
     const targetCalories = this.adjustCaloriesForGoal(bmr, profile.goal);
 
     const result = await this.db.runAsync(
-      `INSERT INTO user_profile (age, gender, weight, height, goal, daily_calorie_target) 
-       VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO user_profile (name, age, gender, weight, height, goal, daily_calorie_target) 
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      // name may be undefined for older flows
+      (profile as any).name || null,
       profile.age,
       profile.gender,
       profile.weight,
@@ -155,6 +171,69 @@ class DatabaseService {
     );
 
     return result.lastInsertRowId;
+  }
+
+  async updateUserProfile(id: number, updates: Partial<UserProfile>): Promise<void> {
+    if (!this.db) throw new Error('Database not initialized');
+
+    const fields: string[] = [];
+    const values: any[] = [];
+
+    if (updates.name !== undefined) {
+      fields.push('name = ?');
+      values.push(updates.name);
+    }
+    if (updates.age !== undefined) {
+      fields.push('age = ?');
+      values.push(updates.age);
+    }
+    if (updates.gender !== undefined) {
+      fields.push('gender = ?');
+      values.push(updates.gender);
+    }
+    if (updates.weight !== undefined) {
+      fields.push('weight = ?');
+      values.push(updates.weight);
+    }
+    if (updates.height !== undefined) {
+      fields.push('height = ?');
+      values.push(updates.height);
+    }
+    if (updates.goal !== undefined) {
+      fields.push('goal = ?');
+      values.push(updates.goal);
+    }
+
+    if (fields.length === 0) return;
+
+    const sql = `UPDATE user_profile SET ${fields.join(', ')} WHERE id = ?`;
+    values.push(id);
+
+    await this.db.runAsync(sql, ...values);
+  }
+
+  async addWeightEntry(userId: number, weight: number, date: string): Promise<number> {
+    if (!this.db) throw new Error('Database not initialized');
+
+    const result = await this.db.runAsync(
+      `INSERT INTO weight_history (user_id, weight, date) VALUES (?, ?, ?)`,
+      userId,
+      weight,
+      date
+    );
+
+    return result.lastInsertRowId;
+  }
+
+  async getWeightHistory(userId: number): Promise<Array<{id:number; weight:number; date:string;}>> {
+    if (!this.db) throw new Error('Database not initialized');
+
+    const rows = await this.db.getAllAsync<any>(
+      `SELECT id, weight, date FROM weight_history WHERE user_id = ? ORDER BY date DESC`,
+      userId
+    );
+
+    return rows || [];
   }
 
   private calculateBMR(age: number, gender: string, weight: number, height: number): number {
@@ -204,7 +283,21 @@ class DatabaseService {
     if (!this.db) throw new Error('Database not initialized');
 
     try {
-      const result = await this.db.getFirstAsync<any>(sqlQuery);
+      // Log raw SQL from the LLM for debugging
+      console.log('Raw SQL from LLM:', sqlQuery);
+
+      // Sanitize common mistakes from generated SQL (e.g. LLM might output `foodname` or `T1.calorie`)
+      let sanitizedSql = sqlQuery;
+      // common wrong tokens -> correct column names
+      sanitizedSql = sanitizedSql.replace(/\bfoodname\b/gi, 'food_name');
+      // alias.calorie or alias.calories -> alias.calories_per_unit
+      sanitizedSql = sanitizedSql.replace(/\b([A-Za-z0-9_]+)\.calories?\b/gi, '$1.calories_per_unit');
+
+      if (sanitizedSql !== sqlQuery) {
+        console.warn('Sanitized SQL query (replaced unknown column names):', sanitizedSql);
+      }
+
+      const result = await this.db.getFirstAsync<any>(sanitizedSql);
       
       if (result) {
         const calorieValue = result.total_calories || result.calories || Object.values(result)[0];
