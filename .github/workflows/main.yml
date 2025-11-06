@@ -1,0 +1,68 @@
+name: EAS Configure & Build Android
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # اجازه‌ی commit/push از Actions
+
+jobs:
+  configure-and-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # برای اطمینان از تاریخچه کامل (اختیاری)
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Install dependencies
+        run: |
+          npm ci || npm install
+
+      - name: Install EAS CLI
+        run: npm install -g eas-cli
+
+      - name: Show Expo user (debug)
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          eas whoami || true
+
+      - name: Run eas build:configure (non-interactive)
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          # Run configure; this will create/update eas.json or app.json with projectId
+          eas build:configure --non-interactive
+
+      - name: Commit and push EAS config if changed
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Stage any changes (eas.json, app.json, app.config.* یا هر فایلی که configure تغییر داده)
+          git add -A
+
+          # only commit & push if there are staged changes
+          if ! git diff --cached --quiet; then
+            git commit -m "ci: add/update EAS projectId via eas build:configure"
+            # push back to the same branch that triggered the workflow
+            git push origin HEAD:main
+          else
+            echo "No configuration changes to commit"
+          fi
+
+      - name: EAS build (Android, production profile)
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          eas build --platform android --profile production --non-interactive
