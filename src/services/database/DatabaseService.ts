@@ -47,6 +47,19 @@ class DatabaseService {
       this.db = await SQLite.openDatabaseAsync('CalorieTracker.db');
       
       await this.createTables();
+
+      // Migration: ensure existing databases have the 'name' column on user_profile
+      try {
+        const cols = await this.db.getAllAsync<any>('PRAGMA table_info(user_profile)');
+        const hasName = cols && cols.some && cols.some((c: any) => c.name === 'name');
+        if (!hasName) {
+          console.log('Migration: adding name column to user_profile');
+          await this.db.execAsync(`ALTER TABLE user_profile ADD COLUMN name TEXT;`);
+        }
+      } catch (e) {
+        // If PRAGMA or ALTER fails, log but continue (old DB may be fresh)
+        console.warn('Migration check failed:', e);
+      }
       await this.seedInitialData();
       
       console.log('✅ Database initialized successfully');
@@ -360,6 +373,28 @@ class DatabaseService {
     if (this.db) {
       await this.db.closeAsync();
       this.db = null;
+    }
+  }
+
+  /**
+   * Remove all user-generated data (keeping seeded foods intact).
+   * This will delete meal entries, weight history and user profiles.
+   */
+  async clearAllData(): Promise<void> {
+    if (!this.db) throw new Error('Database not initialized');
+
+    // Use a transaction to ensure atomicity
+    await this.db.execAsync('BEGIN TRANSACTION;');
+    try {
+      await this.db.execAsync('DELETE FROM meal_entries;');
+      await this.db.execAsync('DELETE FROM weight_history;');
+      await this.db.execAsync('DELETE FROM user_profile;');
+      await this.db.execAsync('COMMIT;');
+      console.log('✅ Cleared user data (meal_entries, weight_history, user_profile)');
+    } catch (e) {
+      await this.db.execAsync('ROLLBACK;');
+      console.error('Failed to clear data:', e);
+      throw e;
     }
   }
 }

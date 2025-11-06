@@ -10,7 +10,7 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
-import { LineChart } from 'react-native-chart-kit';
+import { LineChart, BarChart } from 'react-native-chart-kit';
 import { Dimensions } from 'react-native';
 import moment from 'moment-jalaali';
 import DatabaseService from '../services/database/DatabaseService';
@@ -31,6 +31,8 @@ const HomeScreen: React.FC = () => {
   const [todayTotal, setTodayTotal] = useState(0);
   const [weeklyData, setWeeklyData] = useState<number[]>([]);
   const [weekLabels, setWeekLabels] = useState<string[]>([]);
+  const [dailyLabels, setDailyLabels] = useState<string[]>([]);
+  const [dailyData, setDailyData] = useState<number[]>([]);
 
   // بارگذاری اولیه
   useEffect(() => {
@@ -56,6 +58,16 @@ const HomeScreen: React.FC = () => {
 
       const total = meals.reduce((sum, meal) => sum + meal.total_calories, 0);
       setTodayTotal(total);
+
+    // prepare daily chart data
+    const labels = meals.map(m => m.time);
+    const data = meals.map(m => Math.round(m.total_calories));
+  // create compact daily summary (sum per meal category)
+  const morning = meals.filter(m => parseInt(m.time.split(':')[0]) >= 5 && parseInt(m.time.split(':')[0]) < 12).reduce((s, m) => s + m.total_calories, 0);
+  const afternoon = meals.filter(m => parseInt(m.time.split(':')[0]) >= 12 && parseInt(m.time.split(':')[0]) < 17).reduce((s, m) => s + m.total_calories, 0);
+  const evening = meals.filter(m => { const h = parseInt(m.time.split(':')[0]); return h >= 17 || h < 5; }).reduce((s, m) => s + m.total_calories, 0);
+  setDailyLabels(['صبح', 'ناهار', 'شام']);
+  setDailyData([Math.round(morning), Math.round(afternoon), Math.round(evening)]);
 
       // بارگذاری داده‌های هفتگی برای نمودار
       await loadWeeklyChart(profile.id);
@@ -166,8 +178,10 @@ const HomeScreen: React.FC = () => {
   return (
     <ScrollView style={styles.container}>
       {/* هدر */}
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>سلام! 👋</Text>
+      <View style={[styles.header, styles.headerRight]}> 
+        <Text style={styles.headerTitle}>
+          {userProfile ? `سلام، ${userProfile.name} 👋` : 'سلام! 👋'}
+        </Text>
         <Text style={styles.headerDate}>{moment().format('jYYYY/jMM/jDD')}</Text>
       </View>
 
@@ -231,52 +245,40 @@ const HomeScreen: React.FC = () => {
       </View>
 
       {/* نمودار هفتگی */}
-      {weeklyData.length > 0 && (
-        <View style={styles.chartCard}>
-          <Text style={styles.chartTitle}>روند هفتگی 📊</Text>
-          
-          <LineChart
-            data={{
-              labels: weekLabels,
-              datasets: [
-                {
-                  data: weeklyData,
-                  color: (opacity = 1) => `rgba(67, 97, 238, ${opacity})`,
-                  strokeWidth: 3,
-                },
-                {
-                  data: [userProfile?.daily_calorie_target || 2000], // خط هدف
-                  color: (opacity = 1) => `rgba(255, 99, 71, ${opacity})`,
-                  strokeWidth: 2,
-                  withDots: false,
-                },
-              ],
-            }}
-            width={screenWidth - 40}
-            height={220}
+      {/* weekly chart moved to History tab */}
+
+      {/* نمودار روزانه */}
+      {dailyData.length > 0 && (
+        <View style={[styles.chartCard, { marginTop: 10 }]}>
+          <Text style={styles.chartTitle}>خلاصهٔ روزانه</Text>
+          <BarChart
+            data={{ labels: ['', '', ''], datasets: [{ data: dailyData }] }}
+            width={screenWidth - 80}
+            height={140}
+            fromZero
             chartConfig={{
               backgroundColor: '#fff',
               backgroundGradientFrom: '#fff',
               backgroundGradientTo: '#fff',
               decimalPlaces: 0,
-              color: (opacity = 1) => `rgba(0, 0, 0, ${opacity})`,
+              color: (opacity = 1) => `rgba(67, 97, 238, ${opacity})`,
               labelColor: (opacity = 1) => `rgba(0, 0, 0, ${opacity})`,
-              style: {
-                borderRadius: 16,
-              },
-              propsForDots: {
-                r: '6',
-                strokeWidth: '2',
-                stroke: '#4361EE',
-              },
+              style: { borderRadius: 16 },
             }}
-            bezier
-            style={styles.chart}
+            style={{ ...styles.chart, paddingRight: 10 }}
+            yAxisLabel={""}
+            yAxisSuffix={""}
           />
-          
-          <Text style={styles.chartLegend}>
-            🔵 کالری مصرفی  |  🔴 هدف روزانه
-          </Text>
+
+          {/* Custom labels and values under the chart so we can show exact numbers on top of bars */}
+          <View style={[styles.barMetaRow, { width: screenWidth - 80 }] }>
+            {dailyData.map((val, idx) => (
+              <View key={idx} style={styles.barCell}>
+                <Text style={styles.barValue}>{Math.round(val)}</Text>
+                <Text style={styles.barLabel}>{dailyLabels[idx]}</Text>
+              </View>
+            ))}
+          </View>
         </View>
       )}
 
@@ -316,6 +318,9 @@ const styles = StyleSheet.create({
     padding: 20,
     paddingTop: 50,
     backgroundColor: '#4361EE',
+  },
+  headerRight: {
+    alignItems: 'flex-end',
   },
   headerTitle: {
     fontSize: 32,
@@ -445,6 +450,26 @@ const styles = StyleSheet.create({
   chart: {
     marginVertical: 8,
     borderRadius: 16,
+  },
+  barMetaRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  barCell: {
+    alignItems: 'center',
+    width: (screenWidth - 80) / 3,
+  },
+  barValue: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#333',
+    marginBottom: 4,
+  },
+  barLabel: {
+    fontSize: 12,
+    color: '#666',
   },
   chartLegend: {
     fontSize: 12,

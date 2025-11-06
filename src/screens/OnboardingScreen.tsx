@@ -112,6 +112,18 @@ const OnboardingScreen: React.FC<Props> = ({ navigation }) => {
     <View style={styles.stepContainer}>
       <Text style={styles.stepTitle}>درباره شما بگویید</Text>
 
+      {/* نام */}
+      <View style={styles.inputGroup}>
+        <Text style={styles.label}>نام</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="مثلاً: علی"
+          value={name}
+          onChangeText={setName}
+          maxLength={30}
+        />
+      </View>
+
       {/* سن */}
       <View style={styles.inputGroup}>
         <Text style={styles.label}>سن شما</Text>

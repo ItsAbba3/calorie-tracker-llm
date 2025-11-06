@@ -13,6 +13,8 @@ import {
 import DatabaseService from '../services/database/DatabaseService';
 import NotificationService from '../services/notification/NotificationService';
 import { UserProfile } from '../services/database/DatabaseService';
+import moment from 'moment-jalaali';
+import { useNavigation } from '@react-navigation/native';
 
 const SettingsScreen: React.FC = () => {
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -20,14 +22,25 @@ const SettingsScreen: React.FC = () => {
   const [breakfastTime, setBreakfastTime] = useState('08:00');
   const [lunchTime, setLunchTime] = useState('13:00');
   const [dinnerTime, setDinnerTime] = useState('20:00');
+  const [editableName, setEditableName] = useState('');
+  const [editableWeight, setEditableWeight] = useState('');
+  const [weightHistory, setWeightHistory] = useState<Array<{id:number; weight:number; date:string;}>>([]);
 
   useEffect(() => {
     loadProfile();
   }, []);
 
+  const navigation = useNavigation<any>();
+
   const loadProfile = async () => {
     const userProfile = await DatabaseService.getUserProfile();
     setProfile(userProfile);
+    if (userProfile) {
+      setEditableName(userProfile.name || '');
+      setEditableWeight(String(userProfile.weight));
+      const wh = await DatabaseService.getWeightHistory(userProfile.id);
+      setWeightHistory(wh);
+    }
   };
 
   // تغییر وضعیت نوتیفیکیشن
@@ -89,12 +102,44 @@ const SettingsScreen: React.FC = () => {
           text: 'بله، پاک کن',
           style: 'destructive',
           onPress: async () => {
-            // این قسمت را باید کامل کنید
-            Alert.alert('پاک شد', 'تمام داده‌ها حذف شدند');
+            try {
+              await DatabaseService.clearAllData();
+              // reload local state
+              await loadProfile();
+              Alert.alert('پاک شد', 'تمام داده‌ها حذف شدند');
+              // navigate to onboarding so user can re-create profile
+              navigation.navigate('Onboarding');
+            } catch (error) {
+              console.error('Clear data error:', error);
+              Alert.alert('خطا', 'مشکلی در پاک‌سازی داده‌ها پیش آمد');
+            }
           },
         },
       ]
     );
+  };
+
+  const saveProfileChanges = async () => {
+    if (!profile) return;
+
+    try {
+      await DatabaseService.updateUserProfile(profile.id, {
+        name: editableName.trim(),
+      });
+      // if weight changed, update profile weight and add weight history entry
+      const newWeight = parseFloat(editableWeight);
+      if (!isNaN(newWeight) && newWeight !== profile.weight) {
+        await DatabaseService.updateUserProfile(profile.id, { weight: newWeight });
+        const today = moment().format('jYYYY/jMM/jDD');
+        await DatabaseService.addWeightEntry(profile.id, newWeight, today);
+      }
+
+      Alert.alert('✅ ذخیره شد', 'پروفایل به‌روز شد');
+      await loadProfile();
+    } catch (error) {
+      console.error('Save profile error:', error);
+      Alert.alert('خطا', 'مشکلی در ذخیره‌سازی پیش آمد');
+    }
   };
 
   const getGoalText = (goal: string) => {
@@ -111,16 +156,26 @@ const SettingsScreen: React.FC = () => {
   return (
     <ScrollView style={styles.container}>
       {/* هدر */}
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>تنظیمات ⚙️</Text>
+      <View style={[styles.header, styles.headerRight]}>
+        <Text style={[styles.headerTitle, { textAlign: 'right' }]}>تنظیمات ⚙️</Text>
       </View>
 
       {/* پروفایل کاربر */}
       {profile && (
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>پروفایل شما</Text>
-          
+
           <View style={styles.profileCard}>
+            {/* Editable name */}
+            <View style={{ marginBottom: 12 }}>
+              <Text style={styles.label}>نام</Text>
+              <TextInput
+                style={[styles.input, { backgroundColor: '#F9FAFB' }]}
+                value={editableName}
+                onChangeText={setEditableName}
+              />
+            </View>
+
             <View style={styles.profileRow}>
               <Text style={styles.profileLabel}>سن:</Text>
               <Text style={styles.profileValue}>{profile.age} سال</Text>
@@ -134,19 +189,24 @@ const SettingsScreen: React.FC = () => {
             </View>
 
             <View style={styles.profileRow}>
-              <Text style={styles.profileLabel}>وزن:</Text>
+              <Text style={styles.profileLabel}>وزن فعلی:</Text>
               <Text style={styles.profileValue}>{profile.weight} کیلوگرم</Text>
             </View>
 
-            <View style={styles.profileRow}>
-              <Text style={styles.profileLabel}>قد:</Text>
-              <Text style={styles.profileValue}>{profile.height} سانتی‌متر</Text>
+            <View style={{ marginTop: 12 }}>
+              <Text style={styles.label}>ثبت وزن جدید</Text>
+              <TextInput
+                style={[styles.input, { backgroundColor: '#F9FAFB' }]}
+                value={editableWeight}
+                onChangeText={setEditableWeight}
+                keyboardType="numeric"
+                placeholder="مثلاً: 70"
+              />
             </View>
 
-            <View style={styles.profileRow}>
-              <Text style={styles.profileLabel}>هدف:</Text>
-              <Text style={styles.profileValue}>{getGoalText(profile.goal)}</Text>
-            </View>
+            <TouchableOpacity style={[styles.saveButton, { marginTop: 12 }]} onPress={saveProfileChanges}>
+              <Text style={styles.saveButtonText}>ذخیره تغییرات و ثبت وزن</Text>
+            </TouchableOpacity>
 
             <View style={styles.divider} />
 
@@ -155,6 +215,22 @@ const SettingsScreen: React.FC = () => {
               <Text style={styles.calorieTarget}>
                 {profile.daily_calorie_target} کالری
               </Text>
+            </View>
+          </View>
+
+          {/* Weight history list */}
+          <View style={{ marginTop: 16 }}>
+            <Text style={styles.sectionTitle}>تاریخچه وزن</Text>
+            <View style={styles.card}>
+              {weightHistory.length === 0 && (
+                <Text style={{ color: '#666' }}>تاکنون وزنی ثبت نشده</Text>
+              )}
+              {weightHistory.map(w => (
+                <View key={w.id} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8 }}>
+                  <Text>{w.date}</Text>
+                  <Text style={{ fontWeight: '600' }}>{w.weight} kg</Text>
+                </View>
+              ))}
             </View>
           </View>
         </View>
@@ -235,11 +311,11 @@ const SettingsScreen: React.FC = () => {
 
         <View style={styles.card}>
           <Text style={styles.aboutText}>
-            📱 Calorie Tracker با هوش مصنوعی
+            📱 کالری شمار با هوش مصنوعی
           </Text>
           <Text style={styles.aboutVersion}>نسخه 1.0.0</Text>
           <Text style={styles.aboutDesc}>
-            این اپلیکیشن با استفاده از Groq AI و React Native ساخته شده است.
+            این اپلیکیشن با استفاده از هوش مصنوعی ساخته شده است.
             تمام داده‌های شما به صورت محلی در دستگاهتان ذخیره می‌شود.
           </Text>
         </View>
@@ -278,6 +354,9 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: 'bold',
     color: '#fff',
+  },
+  headerRight: {
+    alignItems: 'flex-end',
   },
   section: {
     padding: 20,
@@ -368,6 +447,20 @@ const styles = StyleSheet.create({
     width: 100,
     textAlign: 'center',
     fontSize: 16,
+  },
+  label: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 8,
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: '#E5E9F2',
+    borderRadius: 12,
+    padding: 12,
+    fontSize: 16,
+    backgroundColor: '#fff',
   },
   saveButton: {
     backgroundColor: '#4361EE',

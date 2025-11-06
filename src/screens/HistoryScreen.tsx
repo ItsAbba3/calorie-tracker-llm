@@ -15,9 +15,10 @@ import { MealEntry } from '../services/database/DatabaseService';
 const HistoryScreen: React.FC = () => {
   const [selectedDate, setSelectedDate] = useState(moment());
   const [meals, setMeals] = useState<MealEntry[]>([]);
-  const [weekDates, setWeekDates] = useState<moment.Moment[]>([]);
+  const [weekDates, setWeekDates] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [dailyTotal, setDailyTotal] = useState(0);
+  const [weeklySummaries, setWeeklySummaries] = useState<Array<{weekLabel:string; total:number; target:number}>>([]);
 
   useEffect(() => {
     generateWeekDates();
@@ -26,7 +27,7 @@ const HistoryScreen: React.FC = () => {
 
   // تولید تاریخ‌های هفته
   const generateWeekDates = () => {
-    const dates: moment.Moment[] = [];
+    const dates: any[] = [];
     for (let i = 6; i >= 0; i--) {
       dates.push(moment().subtract(i, 'days'));
     }
@@ -47,6 +48,20 @@ const HistoryScreen: React.FC = () => {
       
       const total = mealsData.reduce((sum, m) => sum + m.total_calories, 0);
       setDailyTotal(total);
+
+      // load weekly summaries (last 4 weeks)
+      const summaries: Array<{weekLabel:string; total:number; target:number}> = [];
+      for (let w = 0; w < 4; w++) {
+        const end = moment().subtract(w * 7, 'days');
+        const start = end.clone().subtract(6, 'days');
+        const startStr = start.format('jYYYY/jMM/jDD');
+        const endStr = end.format('jYYYY/jMM/jDD');
+
+        const stats = await DatabaseService.getWeeklyStats(profile.id, startStr, endStr);
+        const weekTotal = stats.reduce((s, d) => s + (d.daily_total || 0), 0);
+        summaries.push({ weekLabel: `هفتهٔ ${4 - w}`, total: weekTotal, target: profile.daily_calorie_target * 7 });
+      }
+      setWeeklySummaries(summaries.reverse());
 
     } catch (error) {
       console.error('Load meals error:', error);
@@ -84,7 +99,7 @@ const HistoryScreen: React.FC = () => {
   return (
     <View style={styles.container}>
       {/* هدر */}
-      <View style={styles.header}>
+      <View style={[styles.header, styles.headerRight]}>
         <Text style={styles.headerTitle}>تاریخچه 📅</Text>
       </View>
 
@@ -119,14 +134,7 @@ const HistoryScreen: React.FC = () => {
         })}
       </ScrollView>
 
-      {/* کل کالری روز */}
-      <View style={styles.summaryCard}>
-        <Text style={styles.summaryLabel}>کل کالری</Text>
-        <Text style={styles.summaryValue}>{Math.round(dailyTotal)}</Text>
-        <Text style={styles.summaryMeals}>{meals.length} وعده غذایی</Text>
-      </View>
-
-      {/* لیست وعده‌ها */}
+      {/* لیست وعده‌ها - نمایش اول */}
       <ScrollView
         style={styles.mealsContainer}
         refreshControl={
@@ -200,8 +208,30 @@ const HistoryScreen: React.FC = () => {
           </View>
         )}
 
-        <View style={{ height: 30 }} />
+        <View style={{ height: 20 }} />
       </ScrollView>
+
+      {/* کل کالری روز - بعد از لیست */}
+      <View style={styles.summaryCard}>
+        <Text style={styles.summaryLabel}>کل کالری</Text>
+        <Text style={styles.summaryValue}>{Math.round(dailyTotal)}</Text>
+        <Text style={styles.summaryMeals}>{meals.length} وعده غذایی</Text>
+      </View>
+
+      {/* خلاصه هفتگی - آخر */}
+      {weeklySummaries.length > 0 && (
+        <View style={{ paddingHorizontal: 20 }}>
+          <Text style={{ fontSize: 18, fontWeight: '600', color: '#333', marginBottom: 8 }}>خلاصه هفتگی</Text>
+          <View style={{ backgroundColor: '#fff', borderRadius: 12, padding: 12 }}>
+            {weeklySummaries.map((w, idx) => (
+              <View key={idx} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8 }}>
+                <Text>{w.weekLabel}</Text>
+                <Text style={{ fontWeight: '600' }}>{Math.round(w.total)} / {w.target} کالری</Text>
+              </View>
+            ))}
+          </View>
+        </View>
+      )}
     </View>
   );
 };
@@ -220,6 +250,9 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: 'bold',
     color: '#fff',
+  },
+  headerRight: {
+    alignItems: 'flex-end',
   },
   dateSelector: {
     maxHeight: 90,
