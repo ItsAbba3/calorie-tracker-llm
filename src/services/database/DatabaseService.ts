@@ -134,6 +134,18 @@ class DatabaseService {
         FOREIGN KEY (user_id) REFERENCES user_profile(id)
       );
     `);
+
+    // پیام‌های LLM (تحلیل‌ها)
+    await this.db.execAsync(`
+      CREATE TABLE IF NOT EXISTS llm_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        type TEXT NOT NULL,
+        content TEXT NOT NULL,
+        created_at TEXT DEFAULT (datetime('now', 'localtime')),
+        FOREIGN KEY (user_id) REFERENCES user_profile(id)
+      );
+    `);
   }
 
   private async seedInitialData(): Promise<void> {
@@ -243,6 +255,42 @@ class DatabaseService {
 
     const rows = await this.db.getAllAsync<any>(
       `SELECT id, weight, date FROM weight_history WHERE user_id = ? ORDER BY date DESC`,
+      userId
+    );
+
+    return rows || [];
+  }
+
+  // افزودن پیام LLM
+  async addLLMMessage(userId: number, type: string, content: string): Promise<number> {
+    if (!this.db) throw new Error('Database not initialized');
+
+    const result = await this.db.runAsync(
+      `INSERT INTO llm_messages (user_id, type, content) VALUES (?, ?, ?)`,
+      userId,
+      type,
+      content
+    );
+
+    return result.lastInsertRowId;
+  }
+
+  async getLatestLLMMessage(userId: number): Promise<{id:number; type:string; content:string; created_at:string} | null> {
+    if (!this.db) throw new Error('Database not initialized');
+
+    const row = await this.db.getFirstAsync<any>(
+      `SELECT id, type, content, created_at FROM llm_messages WHERE user_id = ? ORDER BY created_at DESC LIMIT 1`,
+      userId
+    );
+
+    return row || null;
+  }
+
+  async getAllLLMMessages(userId: number): Promise<Array<{id:number; type:string; content:string; created_at:string}>> {
+    if (!this.db) throw new Error('Database not initialized');
+
+    const rows = await this.db.getAllAsync<any>(
+      `SELECT id, type, content, created_at FROM llm_messages WHERE user_id = ? ORDER BY created_at DESC`,
       userId
     );
 

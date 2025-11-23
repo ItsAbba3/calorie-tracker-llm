@@ -1,6 +1,7 @@
 // src/services/llm/GroqService.ts
 import OpenAI from 'openai';
 import ConfigService from '../config/ConfigService';
+import * as Notifications from 'expo-notifications';
 
 interface DetectedFood {
   food: string;
@@ -21,16 +22,20 @@ interface UnitConversion {
 }
 
 class GroqService {
-  private client: OpenAI;
+  private client: OpenAI | null = null;
 
-  constructor() {
-    // طبق مستندات Groq، از OpenAI SDK با base URL مخصوص استفاده می‌کنیم
-    const apiKey = ConfigService.getGroqApiKey();
-    
+  private async ensureClient() {
+    if (this.client) return;
+
+    const apiKey = await ConfigService.getStoredGroqApiKey();
+    if (!apiKey) {
+      throw new Error('Groq API key is not set. Please configure it in settings.');
+    }
+
     this.client = new OpenAI({
       apiKey: apiKey,
       baseURL: 'https://api.groq.com/openai/v1',
-      dangerouslyAllowBrowser: true, // برای Expo
+      dangerouslyAllowBrowser: true,
     });
   }
 
@@ -94,7 +99,8 @@ FROM (
     // Instruct the model to use these exact names (use `name` for foods, `food_name` for meal entries).
 
     try {
-      const completion = await this.client.chat.completions.create({
+      await this.ensureClient();
+      const completion = await (this.client as OpenAI).chat.completions.create({
         model: 'llama-3.3-70b-versatile', // مدل قوی و سریع
         messages: [
           {
@@ -158,7 +164,8 @@ FROM (
 `;
 
     try {
-      const completion = await this.client.chat.completions.create({
+      await this.ensureClient();
+      const completion = await (this.client as OpenAI).chat.completions.create({
         model: 'llama-3.3-70b-versatile',
         messages: [
           {
@@ -220,7 +227,8 @@ FROM (
 `;
 
     try {
-      const completion = await this.client.chat.completions.create({
+      await this.ensureClient();
+      const completion = await (this.client as OpenAI).chat.completions.create({
         model: 'llama-3.3-70b-versatile',
         messages: [
           {
@@ -285,7 +293,8 @@ ${dataText}
 `;
 
     try {
-      const completion = await this.client.chat.completions.create({
+      await this.ensureClient();
+      const completion = await (this.client as OpenAI).chat.completions.create({
         model: 'llama-3.3-70b-versatile',
         messages: [
           { role: 'system', content: 'تو یک تحلیلگر داده‌های تغذیه هستی.' },

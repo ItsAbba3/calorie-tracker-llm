@@ -15,6 +15,8 @@ import NotificationService from '../services/notification/NotificationService';
 import { UserProfile } from '../services/database/DatabaseService';
 import moment from 'moment-jalaali';
 import { useNavigation } from '@react-navigation/native';
+import ConfigService from '../services/config/ConfigService';
+import AnalysisService from '../services/llm/AnalysisService';
 
 const SettingsScreen: React.FC = () => {
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -25,9 +27,18 @@ const SettingsScreen: React.FC = () => {
   const [editableName, setEditableName] = useState('');
   const [editableWeight, setEditableWeight] = useState('');
   const [weightHistory, setWeightHistory] = useState<Array<{id:number; weight:number; date:string;}>>([]);
+  const [groqKey, setGroqKey] = useState('');
 
   useEffect(() => {
     loadProfile();
+    (async () => {
+      try {
+        const key = await ConfigService.getStoredGroqApiKey();
+        setGroqKey(key);
+      } catch (e) {
+        console.warn('Failed to load groq key:', e);
+      }
+    })();
   }, []);
 
   const navigation = useNavigation<any>();
@@ -132,6 +143,12 @@ const SettingsScreen: React.FC = () => {
         await DatabaseService.updateUserProfile(profile.id, { weight: newWeight });
         const today = moment().format('jYYYY/jMM/jDD');
         await DatabaseService.addWeightEntry(profile.id, newWeight, today);
+        // generate weight-change analysis
+        try {
+          await AnalysisService.generateAnalysisForUser(profile.id, 'weight_change');
+        } catch (e) {
+          console.warn('Weight-change analysis failed:', e);
+        }
       }
 
       Alert.alert('✅ ذخیره شد', 'پروفایل به‌روز شد');
@@ -235,6 +252,33 @@ const SettingsScreen: React.FC = () => {
           </View>
         </View>
       )}
+
+          {/* Groq API Key */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>کلید API Groq</Text>
+            <View style={styles.card}>
+              <Text style={{ marginBottom: 8, color: '#666' }}>در اینجا می‌توانید کلید API سرویس Groq را وارد کنید. این کلید در فضای امن دستگاه ذخیره می‌شود.</Text>
+              <TextInput
+                style={[styles.input, { backgroundColor: '#F9FAFB' }]}
+                placeholder="sk-..."
+                value={groqKey}
+                onChangeText={setGroqKey}
+                autoCapitalize="none"
+              />
+
+              <TouchableOpacity style={[styles.saveButton, { marginTop: 12 }]} onPress={async () => {
+                try {
+                  await ConfigService.setStoredGroqApiKey(groqKey.trim());
+                  Alert.alert('✅ ذخیره شد', 'کلید API با موفقیت ذخیره شد');
+                } catch (e) {
+                  console.error('Save groq key failed:', e);
+                  Alert.alert('خطا', 'ذخیره‌سازی کلید API ناموفق بود');
+                }
+              }}>
+                <Text style={styles.saveButtonText}>ذخیره کلید API</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
 
       {/* یادآوری‌ها */}
       <View style={styles.section}>

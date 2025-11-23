@@ -7,6 +7,7 @@ import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import DatabaseService from './src/services/database/DatabaseService';
 import NotificationService from './src/services/notification/NotificationService';
+import AnalysisService from './src/services/llm/AnalysisService';
 import OnboardingScreen from './src/screens/OnboardingScreen';
 import HomeScreen from './src/screens/HomeScreen';
 import HistoryScreen from './src/screens/HistoryScreen';
@@ -22,17 +23,17 @@ function MainTabs() {
       <Tab.Screen
         name="Settings"
         component={SettingsScreen}
-        options={{ tabBarLabel: 'تنظیمات ⚙️' }}
+        options={{ tabBarLabel: 'تنظیمات ⚙️', tabBarIcon: () => null }}
       />
       <Tab.Screen
         name="History"
         component={HistoryScreen}
-        options={{ tabBarLabel: 'تاریخچه 📅' }}
+        options={{ tabBarLabel: 'تاریخچه 📅', tabBarIcon: () => null }}
       />
       <Tab.Screen
         name="Home"
         component={HomeScreen}
-        options={{ tabBarLabel: 'خانه 🏠' }}
+        options={{ tabBarLabel: 'خانه 🏠', tabBarIcon: () => null }}
       />
     </Tab.Navigator>
   );
@@ -69,6 +70,12 @@ export default function App() {
       if (profile) {
         await NotificationService.scheduleSmartReminders(profile.id);
         console.log('✅ Smart reminders scheduled');
+        // check and generate any pending LLM analyses
+        try {
+          await AnalysisService.checkAndGeneratePending(profile.id);
+        } catch (e) {
+          console.warn('Analysis check failed:', e);
+        }
       }
 
       setIsReady(true);
