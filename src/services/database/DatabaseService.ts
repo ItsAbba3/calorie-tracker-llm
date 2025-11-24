@@ -177,6 +177,7 @@ class DatabaseService {
     try {
       // باز کردن یا ایجاد دیتابیس
       this.db = await SQLite.openDatabaseAsync('CalorieTracker.db');
+      console.log('Opening SQLite DB: CalorieTracker.db');
       
       await this.createTables();
 
@@ -475,7 +476,7 @@ class DatabaseService {
     const result = await this.db.getFirstAsync<UserProfile>(
       'SELECT * FROM user_profile ORDER BY id DESC LIMIT 1'
     );
-    
+    console.log('getUserProfile result:', result);
     return result || null;
   }
 

@@ -178,11 +178,62 @@ const HomeScreen: React.FC = () => {
 
       // 3. ابتدا سعی می‌کنیم کالری را به صورت محلی محاسبه کنیم با استفاده از دیتابیس foods
       let totalCalories = 0;
+      // helper: normalize string
+      const normalize = (s: string) => s.trim().toLowerCase();
+
+      const findFoodMatch = (detectedName: string) => {
+        const d = normalize(detectedName);
+        // exact match
+        let found = allFoods.find(f => normalize(f.name) === d);
+        if (found) return found;
+        // includes (DB includes detected)
+        found = allFoods.find(f => normalize(f.name).includes(d));
+        if (found) return found;
+        // reverse includes (detected includes DB name)
+        found = allFoods.find(f => d.includes(normalize(f.name)));
+        if (found) return found;
+        // token-based: all words in detected present in db name
+        const dWords = d.split(/\s+/).filter(Boolean);
+        found = allFoods.find(f => {
+          const dbn = normalize(f.name);
+          return dWords.every(w => dbn.includes(w));
+        });
+        return found || null;
+      };
+
+      // Compute per-item calories, with unit conversion fallback via GroqService if needed
+      const perItemCalories: number[] = [];
       for (const item of parseResult.detected_items) {
-        const found = allFoods.find(f => f.name.toLowerCase() === item.food.toLowerCase());
-        if (found) {
-          totalCalories += (item.quantity || 0) * (found.calories_per_unit || 0);
+        const detectedName = item.food || '';
+        const qty = item.quantity || 0;
+        const unit = item.unit || '';
+        const matched = findFoodMatch(detectedName);
+        let itemCal = 0;
+
+        if (matched) {
+          // if units look compatible, multiply directly
+          if (unit && matched.unit && unit === matched.unit) {
+            itemCal = qty * (matched.calories_per_unit || 0);
+          } else if (unit && matched.unit && unit.includes(matched.unit)) {
+            itemCal = qty * (matched.calories_per_unit || 0);
+          } else {
+            // ask Groq to convert units if API key available
+            try {
+              const conv = await GroqService.convertUnits(foodInput, qty, unit || 'عدد', matched.unit || '100 گرم');
+              if (conv && conv.conversion_factor) {
+                itemCal = conv.conversion_factor * (matched.calories_per_unit || 0);
+              } else {
+                itemCal = qty * (matched.calories_per_unit || 0);
+              }
+            } catch (e) {
+              console.warn('Unit conversion failed, falling back to direct multiply:', e);
+              itemCal = qty * (matched.calories_per_unit || 0);
+            }
+          }
         }
+
+        perItemCalories.push(itemCal);
+        totalCalories += itemCal;
       }
 
       // اگر محاسبه محلی صفر بود، از SQL خروجی LLM استفاده کن (فقط به عنوان fallback)
