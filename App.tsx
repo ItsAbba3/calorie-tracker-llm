@@ -1,10 +1,8 @@
 // App.tsx - EXPO VERSION
 import React, { useEffect, useState } from 'react';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
-import { StatusBar } from 'expo-status-bar';
+import { I18nManager, View, ActivityIndicator, StyleSheet } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
-import { createStackNavigator } from '@react-navigation/stack';
-import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import DatabaseService from './src/services/database/DatabaseService';
 import NotificationService from './src/services/notification/NotificationService';
 import AnalysisService from './src/services/llm/AnalysisService';
@@ -14,35 +12,14 @@ import HomeScreen from './src/screens/HomeScreen';
 import HistoryScreen from './src/screens/HistoryScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 
-const Stack = createStackNavigator();
-const Tab = createBottomTabNavigator();
+I18nManager.allowRTL(true);
+I18nManager.forceRTL(true);
 
-function MainTabs() {
-  return (
-    // Order: Settings (left), History (center), Home (right)
-    <Tab.Navigator screenOptions={{ headerShown: false }}>
-      <Tab.Screen
-        name="Settings"
-        component={SettingsScreen}
-        options={{ tabBarLabel: 'تنظیمات ⚙️', tabBarIcon: () => null }}
-      />
-      <Tab.Screen
-        name="History"
-        component={HistoryScreen}
-        options={{ tabBarLabel: 'تاریخچه 📅', tabBarIcon: () => null }}
-      />
-      <Tab.Screen
-        name="Home"
-        component={HomeScreen}
-        options={{ tabBarLabel: 'خانه 🏠', tabBarIcon: () => null }}
-      />
-    </Tab.Navigator>
-  );
-}
+const Stack = createNativeStackNavigator();
 
 export default function App() {
   const [isReady, setIsReady] = useState(false);
-  const [hasProfile, setHasProfile] = useState(false);
+  const [hasProfile, setHasProfile] = useState<boolean | null>(null);
 
   useEffect(() => {
     initializeApp();
@@ -120,19 +97,15 @@ export default function App() {
   }
 
   return (
-    <>
-      <StatusBar style="light" />
-      
-      <NavigationContainer>
-        <Stack.Navigator
-          initialRouteName={hasProfile ? 'Main' : 'Onboarding'}
-          screenOptions={{ headerShown: false }}
-        >
-          <Stack.Screen name="Onboarding" component={OnboardingScreen} />
-          <Stack.Screen name="Main" component={MainTabs} />
-        </Stack.Navigator>
-      </NavigationContainer>
-    </>
+    <NavigationContainer>
+      <Stack.Navigator
+        initialRouteName={hasProfile ? 'Home' : 'Onboarding'}
+        screenOptions={{ headerShown: false }}
+      >
+        <Stack.Screen name="Onboarding" component={OnboardingScreen} />
+        <Stack.Screen name="Home" component={HomeScreen} />
+      </Stack.Navigator>
+    </NavigationContainer>
   );
 }
 

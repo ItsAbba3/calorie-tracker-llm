@@ -2,6 +2,7 @@
 import * as SQLite from 'expo-sqlite';
 import { SAMPLE_FOODS_DATA } from '../../constants/database';
 import * as SecureStore from 'expo-secure-store';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export interface UserProfile {
   id: number;
@@ -37,6 +38,136 @@ export interface MealEntry {
   date: string;
   time: string;
   created_at: string;
+}
+
+const PROFILE_KEY = '@ct_profile_v1';
+const FOOD_DB_KEY = '@ct_food_db_v1';
+const MEALS_KEY = '@ct_meals_v1';
+
+type FoodItem = {
+  id?: string;
+  name: string;
+  caloriesPer100g?: number;
+  caloriesPerUnit?: number;
+  unitName?: string; // e.g., "عدد", "بشقاب", "گرم"
+  unitWeightGrams?: number; // weight of 1 unit in grams (optional)
+  [k: string]: any;
+};
+
+const defaultPortionWeights: Record<string, number> = {
+  'بشقاب': 200,
+  'کاسه': 150,
+  'قاشق': 15,
+  'حبه': 10,
+  // کم و زیاد بر حسب نیاز قابل تنظیم است
+};
+
+async function getProfile() {
+  try {
+    const s = await AsyncStorage.getItem(PROFILE_KEY);
+    return s ? JSON.parse(s) : null;
+  } catch (e) {
+    console.warn('DB:getProfile error', e);
+    return null;
+  }
+}
+
+async function saveProfile(profile: any) {
+  try {
+    await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
+    return true;
+  } catch (e) {
+    console.warn('DB:saveProfile error', e);
+    return false;
+  }
+}
+
+async function getFoodDb(): Promise<FoodItem[]> {
+  try {
+    const s = await AsyncStorage.getItem(FOOD_DB_KEY);
+    if (!s) return [];
+    return JSON.parse(s);
+  } catch (e) {
+    console.warn('DB:getFoodDb error', e);
+    return [];
+  }
+}
+
+async function saveFoodDb(list: FoodItem[]) {
+  try {
+    await AsyncStorage.setItem(FOOD_DB_KEY, JSON.stringify(list));
+    return true;
+  } catch (e) {
+    console.warn('DB:saveFoodDb error', e);
+    return false;
+  }
+}
+
+function findFoodByName(list: FoodItem[], name: string) {
+  const n = name.trim().toLowerCase();
+  return list.find(
+    (f) =>
+      f.name &&
+      f.name.toLowerCase() === n
+  ) || null;
+}
+
+async function calculateCalories(foodName: string, quantity = 1, unit: string | null = null): Promise<{ calories: number; matched?: FoodItem | null }> {
+  try {
+    const db = await getFoodDb();
+    const matched = findFoodByName(db, foodName);
+
+    // normalize quantity
+    const q = Number(quantity) || 0;
+
+    if (!matched) {
+      // fallback 0 but return matched=null for logging
+      return { calories: 0, matched: null };
+    }
+
+    // If calories per unit exists and unit matches or unit is null, use it
+    if (matched.caloriesPerUnit && (unit == null || matched.unitName == null || matched.unitName === unit)) {
+      return { calories: matched.caloriesPerUnit * q, matched };
+    }
+
+    // If we have calories per 100g, try to compute using unitWeightGrams or default portion weights
+    if (matched.caloriesPer100g) {
+      let grams = 0;
+      if (matched.unitWeightGrams) {
+        grams = (matched.unitWeightGrams) * q;
+      } else if (unit && defaultPortionWeights[unit]) {
+        grams = defaultPortionWeights[unit] * q;
+      } else {
+        // If no unit weight, assume quantity is in "واحد" and fallback to 100g per unit
+        grams = q * 100;
+      }
+      const calories = (matched.caloriesPer100g / 100) * grams;
+      return { calories: Math.round(calories), matched };
+    }
+
+    // last fallback: if has calories field
+    if ((matched as any).calories) {
+      return { calories: (matched as any).calories * q, matched };
+    }
+
+    return { calories: 0, matched };
+  } catch (e) {
+    console.warn('DB:calculateCalories error', e);
+    return { calories: 0, matched: null };
+  }
+}
+
+async function insertMeal(meal: any) {
+  try {
+    const s = await AsyncStorage.getItem(MEALS_KEY);
+    const arr = s ? JSON.parse(s) : [];
+    arr.push({ id: `${Date.now()}`, ...meal });
+    await AsyncStorage.setItem(MEALS_KEY, JSON.stringify(arr));
+    return true;
+  } catch (e) {
+    console.warn('DB:insertMeal error', e);
+    return false;
+  }
 }
 
 class DatabaseService {
@@ -466,4 +597,12 @@ class DatabaseService {
   }
 }
 
-export default new DatabaseService();
+export default {
+  ...new DatabaseService(),
+  getProfile,
+  saveProfile,
+  getFoodDb,
+  saveFoodDb,
+  calculateCalories,
+  insertMeal,
+};

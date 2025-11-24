@@ -17,6 +17,7 @@ import DatabaseService from '../services/database/DatabaseService';
 import GroqService from '../services/llm/GroqService';
 import { UserProfile, MealEntry } from '../services/database/DatabaseService';
 import { Modal } from 'react-native';
+import AnalysisService from '../services/llm/AnalysisService';
 
 // Component to list all LLM messages
 const AllLLMMessagesList: React.FC<{ onClose: () => void }> = ({ onClose }) => {
@@ -69,6 +70,8 @@ const HomeScreen: React.FC = () => {
   const [dailyData, setDailyData] = useState<number[]>([]);
   const [latestAnalysis, setLatestAnalysis] = useState<string | null>(null);
   const [analysisModalVisible, setAnalysisModalVisible] = useState(false);
+  const [input, setInput] = useState('');
+  const [lastResult, setLastResult] = useState<any>(null);
 
   // بارگذاری اولیه
   useEffect(() => {
@@ -246,6 +249,22 @@ const HomeScreen: React.FC = () => {
     return Math.max(userProfile.daily_calorie_target - todayTotal, 0);
   };
 
+  const handleAnalyze = async () => {
+    // فرض: این تابع متن ورودی کاربر را به LLM می‌دهد و خروجی را به صورت parsedFoods دریافت می‌کند.
+    // برای نمونه فرضی از یک parser ساده استفاده می‌کنیم یا اگر در پروژه‌ی شما LLM integration موجود است از آن استفاده شود.
+    // اینجا فقط فرض می‌کنیم parsedFoods آماده است (مثال: [{name:'برنج', quantity:1.5, unit:'بشقاب'}, {name:'ران مرغ', quantity:1, unit:'عدد'}])
+    const parsedFoods = await fakeParse(input);
+    const analysis = await AnalysisService.analyzeFoods(parsedFoods);
+    setLastResult(analysis);
+
+    // ذخیره لاگ غذاها
+    await DatabaseService.insertMeal({
+      input,
+      analysis,
+      createdAt: Date.now(),
+    });
+  };
+
   return (
     <ScrollView style={styles.container}>
       {/* هدر */}
@@ -407,6 +426,15 @@ const HomeScreen: React.FC = () => {
     </ScrollView>
   );
 };
+
+async function fakeParse(text: string) {
+  // فقط مثال؛ در پروژه‌تان حتماً از LLM یا parser خود استفاده کنید
+  // برای ورودی: "یک بشقاب و نصف برنج و یک ران مرغ" خروجی زیر تولید می‌کنیم:
+  return [
+    { name: 'برنج', quantity: 1.5, unit: 'بشقاب' },
+    { name: 'ران مرغ', quantity: 1, unit: 'عدد' },
+  ];
+}
 
 const styles = StyleSheet.create({
   container: {
