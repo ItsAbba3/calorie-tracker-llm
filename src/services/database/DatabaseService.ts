@@ -1,6 +1,7 @@
 // src/services/database/DatabaseService.ts - EXPO VERSION
 import * as SQLite from 'expo-sqlite';
 import { SAMPLE_FOODS_DATA } from '../../constants/database';
+import * as SecureStore from 'expo-secure-store';
 
 export interface UserProfile {
   id: number;
@@ -195,7 +196,25 @@ class DatabaseService {
       targetCalories
     );
 
-    return result.lastInsertRowId;
+    const id = result.lastInsertRowId;
+    // backup to SecureStore so we can restore if DB is missing on startup
+    try {
+      await SecureStore.setItemAsync('profile_backup', JSON.stringify({ ...profile, id }));
+    } catch (e) {
+      console.warn('Failed to write profile backup to SecureStore:', e);
+    }
+
+    return id;
+  }
+
+  // Save a backup of the profile to SecureStore for redundancy
+  async backupUserProfile(profile: Omit<UserProfile, 'id' | 'created_at' | 'daily_calorie_target'>, id: number) {
+    try {
+      const toSave = { ...profile, id };
+      await SecureStore.setItemAsync('profile_backup', JSON.stringify(toSave));
+    } catch (e) {
+      console.warn('Failed to backup profile to SecureStore:', e);
+    }
   }
 
   async updateUserProfile(id: number, updates: Partial<UserProfile>): Promise<void> {
@@ -373,7 +392,7 @@ class DatabaseService {
 
   async saveMealEntry(entry: Omit<MealEntry, 'id' | 'created_at'>): Promise<void> {
     if (!this.db) throw new Error('Database not initialized');
-
+    console.log('Saving meal entry for user', entry.user_id, entry.food_name, entry.total_calories);
     await this.db.runAsync(
       `INSERT INTO meal_entries (user_id, food_name, quantity, unit, total_calories, raw_input, date, time) 
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,

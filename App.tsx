@@ -8,6 +8,7 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import DatabaseService from './src/services/database/DatabaseService';
 import NotificationService from './src/services/notification/NotificationService';
 import AnalysisService from './src/services/llm/AnalysisService';
+import * as SecureStore from 'expo-secure-store';
 import OnboardingScreen from './src/screens/OnboardingScreen';
 import HomeScreen from './src/screens/HomeScreen';
 import HistoryScreen from './src/screens/HistoryScreen';
@@ -63,7 +64,30 @@ export default function App() {
       console.log('✅ Notifications initialized');
 
       // 3. چک کردن وجود پروفایل کاربر
-      const profile = await DatabaseService.getUserProfile();
+      let profile = await DatabaseService.getUserProfile();
+
+      // If DB has no profile but we have a backup in SecureStore, attempt restore
+      if (!profile) {
+        try {
+          const backup = await SecureStore.getItemAsync('profile_backup');
+          if (backup) {
+            console.log('Found profile backup in SecureStore — restoring to DB');
+            const parsed = JSON.parse(backup);
+            await DatabaseService.saveUserProfile({
+              name: parsed.name || '',
+              age: parsed.age || 25,
+              gender: parsed.gender || 'male',
+              weight: parsed.weight || 70,
+              height: parsed.height || 170,
+              goal: parsed.goal || 'maintain',
+            });
+            profile = await DatabaseService.getUserProfile();
+          }
+        } catch (e) {
+          console.warn('Profile restore failed:', e);
+        }
+      }
+
       setHasProfile(profile !== null);
 
       // 4. اگر پروفایل داشت، یادآوری هوشمند را فعال کن

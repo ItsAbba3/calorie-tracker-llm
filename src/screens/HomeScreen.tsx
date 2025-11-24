@@ -16,6 +16,40 @@ import moment from 'moment-jalaali';
 import DatabaseService from '../services/database/DatabaseService';
 import GroqService from '../services/llm/GroqService';
 import { UserProfile, MealEntry } from '../services/database/DatabaseService';
+import { Modal } from 'react-native';
+
+// Component to list all LLM messages
+const AllLLMMessagesList: React.FC<{ onClose: () => void }> = ({ onClose }) => {
+  const [msgs, setMsgs] = React.useState<Array<{id:number; type:string; content:string; created_at:string}>>([]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const profile = await DatabaseService.getUserProfile();
+        if (!profile) return;
+        const all = await DatabaseService.getAllLLMMessages(profile.id);
+        setMsgs(all);
+      } catch (e) {
+        console.warn('Failed to load LLM messages:', e);
+      }
+    })();
+  }, []);
+
+  return (
+    <View style={{ flex: 1 }}>
+      {msgs.map(m => (
+        <View key={m.id} style={{ backgroundColor: '#fff', padding: 12, borderRadius: 10, marginBottom: 10 }}>
+          <Text style={{ color: '#666', fontSize: 12 }}>{m.type} — {m.created_at}</Text>
+          <Text style={{ marginTop: 6, color: '#333' }}>{m.content}</Text>
+        </View>
+      ))}
+
+      <TouchableOpacity style={{ marginTop: 10 }} onPress={onClose}>
+        <Text style={{ color: '#4361EE', fontWeight: '700' }}>بستن</Text>
+      </TouchableOpacity>
+    </View>
+  );
+};
 
 // تنظیم locale به فارسی
 moment.loadPersian({ dialect: 'persian-modern' });
@@ -33,11 +67,25 @@ const HomeScreen: React.FC = () => {
   const [weekLabels, setWeekLabels] = useState<string[]>([]);
   const [dailyLabels, setDailyLabels] = useState<string[]>([]);
   const [dailyData, setDailyData] = useState<number[]>([]);
+  const [latestAnalysis, setLatestAnalysis] = useState<string | null>(null);
+  const [analysisModalVisible, setAnalysisModalVisible] = useState(false);
 
   // بارگذاری اولیه
   useEffect(() => {
     initializeData();
+    loadLatestAnalysis();
   }, []);
+
+  const loadLatestAnalysis = async () => {
+    try {
+      const profile = await DatabaseService.getUserProfile();
+      if (!profile) return;
+      const latest = await DatabaseService.getLatestLLMMessage(profile.id);
+      setLatestAnalysis(latest ? latest.content : null);
+    } catch (e) {
+      console.warn('Failed to load latest analysis:', e);
+    }
+  };
 
   const initializeData = async () => {
     try {
@@ -125,22 +173,43 @@ const HomeScreen: React.FC = () => {
         return;
       }
 
-      // 3. محاسبه کالری با SQL
-      const totalCalories = await DatabaseService.executeCalorieQuery(
-        parseResult.sql_query
-      );
+      // 3. ابتدا سعی می‌کنیم کالری را به صورت محلی محاسبه کنیم با استفاده از دیتابیس foods
+      let totalCalories = 0;
+      for (const item of parseResult.detected_items) {
+        const found = allFoods.find(f => f.name.toLowerCase() === item.food.toLowerCase());
+        if (found) {
+          totalCalories += (item.quantity || 0) * (found.calories_per_unit || 0);
+        }
+      }
+
+      // اگر محاسبه محلی صفر بود، از SQL خروجی LLM استفاده کن (فقط به عنوان fallback)
+      if (totalCalories === 0 && parseResult.sql_query) {
+        try {
+          totalCalories = await DatabaseService.executeCalorieQuery(parseResult.sql_query);
+        } catch (e) {
+          console.warn('Fallback SQL calorie query failed:', e);
+        }
+      }
 
       // 4. ذخیره در دیتابیس
       const today = moment().format('jYYYY/jMM/jDD');
       const now = moment().format('HH:mm');
 
+      // Save each detected item with computed calories (distribute proportionally)
+      const perItem = parseResult.detected_items.length > 0 ? totalCalories / parseResult.detected_items.length : 0;
       for (const item of parseResult.detected_items) {
+        let itemCalories = perItem;
+        const found = allFoods.find(f => f.name.toLowerCase() === item.food.toLowerCase());
+        if (found) {
+          itemCalories = (item.quantity || 0) * (found.calories_per_unit || 0);
+        }
+
         await DatabaseService.saveMealEntry({
           user_id: userProfile.id,
           food_name: item.food,
           quantity: item.quantity,
           unit: item.unit,
-          total_calories: totalCalories / parseResult.detected_items.length, // تقسیم بین آیتم‌ها
+          total_calories: itemCalories,
           raw_input: foodInput,
           date: today,
           time: now,
@@ -155,6 +224,8 @@ const HomeScreen: React.FC = () => {
         '✅ ثبت شد!',
         `${Math.round(totalCalories)} کالری اضافه شد.\n\n${parseResult.explanation || ''}`
       );
+      // refresh latest analysis card
+      await loadLatestAnalysis();
 
     } catch (error: any) {
       console.error('Food processing error:', error);
@@ -281,6 +352,34 @@ const HomeScreen: React.FC = () => {
           </View>
         </View>
       )}
+
+      {/* تحلیل هوش مصنوعی - پیام آخر */}
+      <View style={{ paddingHorizontal: 20, marginTop: 10 }}>
+        <Text style={{ fontSize: 18, fontWeight: '600', color: '#333', marginBottom: 8 }}>تحلیل هوش مصنوعی</Text>
+        <View style={{ backgroundColor: '#fff', borderRadius: 12, padding: 12, minHeight: 80 }}>
+          {latestAnalysis ? (
+            <View>
+              <Text numberOfLines={5} style={{ color: '#333' }}>{latestAnalysis}</Text>
+              <TouchableOpacity style={{ marginTop: 8 }} onPress={() => setAnalysisModalVisible(true)}>
+                <Text style={{ color: '#4361EE', fontWeight: '600' }}>دیدن همه پیام‌ها</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <Text style={{ color: '#666' }}>هنوز تحلیلی تولید نشده</Text>
+          )}
+        </View>
+      </View>
+
+      {/* Modal for all messages */}
+      <Modal visible={analysisModalVisible} animationType="slide" onRequestClose={() => setAnalysisModalVisible(false)}>
+        <View style={{ flex: 1, padding: 20, backgroundColor: '#f7fafc' }}>
+          <Text style={{ fontSize: 20, fontWeight: '700', marginBottom: 12 }}>پیام‌های تحلیل</Text>
+          <ScrollView>
+            {/* fetch and render all messages */}
+            <AllLLMMessagesList onClose={() => setAnalysisModalVisible(false)} />
+          </ScrollView>
+        </View>
+      </Modal>
 
       {/* لیست وعده‌های امروز */}
       {todayMeals.length > 0 && (
