@@ -19,9 +19,27 @@ export default function OnboardingScreen({ navigation }: any) {
   const [weight, setWeight] = useState('');
 
   const save = async () => {
-    const profile = { name, age, height, weight, createdAt: Date.now() };
-    await DatabaseService.saveProfile(profile);
-    navigation.replace('Home');
+    // اعتبارسنجی ورودی‌ها
+    if (!name.trim() || !age || !height || !weight) {
+      Alert.alert('خطا', 'لطفاً تمام فیلدها را پر کنید');
+      return;
+    }
+
+    try {
+      // استفاده از saveUserProfile که در SQLite ذخیره می‌کند
+      await DatabaseService.saveUserProfile({
+        name: name.trim(),
+        age: parseInt(age) || 25,
+        gender: 'male', // پیش‌فرض - می‌توان بعداً در تنظیمات تغییر داد
+        weight: parseFloat(weight) || 70,
+        height: parseFloat(height) || 170,
+        goal: 'maintain', // پیش‌فرض - می‌توان بعداً در تنظیمات تغییر داد
+      });
+      navigation.replace('Home');
+    } catch (error: any) {
+      console.error('Error saving profile:', error);
+      Alert.alert('خطا', 'مشکلی در ذخیره اطلاعات پیش آمد. لطفاً دوباره تلاش کنید.');
+    }
   };
 
   return (

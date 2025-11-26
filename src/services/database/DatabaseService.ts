@@ -1,6 +1,6 @@
 // src/services/database/DatabaseService.ts - EXPO VERSION
 import * as SQLite from 'expo-sqlite';
-import { SAMPLE_FOODS_DATA } from '../../constants/database';
+import { MERGED_FOODS_DATA } from '../../constants/database';
 import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -291,7 +291,7 @@ class DatabaseService {
     if (result && result.count === 0) {
       console.log('🌱 Seeding initial food data...');
       
-      for (const food of SAMPLE_FOODS_DATA) {
+      for (const food of MERGED_FOODS_DATA) {
         await this.db.runAsync(
           `INSERT INTO foods (name, calories_per_unit, unit, category, protein, carbs, fat) 
            VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -305,7 +305,7 @@ class DatabaseService {
         );
       }
       
-      console.log(`✅ Seeded ${SAMPLE_FOODS_DATA.length} foods`);
+      console.log(`✅ Seeded ${MERGED_FOODS_DATA.length} foods`);
     }
   }
 

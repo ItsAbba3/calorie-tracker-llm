@@ -9,19 +9,20 @@ import {
   StyleSheet,
   ActivityIndicator,
   Alert,
+  Modal,
 } from 'react-native';
-import { LineChart, BarChart } from 'react-native-chart-kit';
+import { BarChart } from 'react-native-chart-kit';
 import { Dimensions } from 'react-native';
 import moment from 'moment-jalaali';
 import DatabaseService from '../services/database/DatabaseService';
 import GroqService from '../services/llm/GroqService';
 import { UserProfile, MealEntry } from '../services/database/DatabaseService';
-import { Modal } from 'react-native';
 import AnalysisService from '../services/llm/AnalysisService';
 
-// Component to list all LLM messages
+// Component to list all LLM messages with high-tech design
 const AllLLMMessagesList: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const [msgs, setMsgs] = React.useState<Array<{id:number; type:string; content:string; created_at:string}>>([]);
+  const [loading, setLoading] = React.useState(true);
 
   useEffect(() => {
     (async () => {
@@ -32,22 +33,84 @@ const AllLLMMessagesList: React.FC<{ onClose: () => void }> = ({ onClose }) => {
         setMsgs(all);
       } catch (e) {
         console.warn('Failed to load LLM messages:', e);
+      } finally {
+        setLoading(false);
       }
     })();
   }, []);
 
+  const getTypeLabel = (type: string) => {
+    switch(type) {
+      case 'daily': return 'تحلیل روزانه';
+      case '3day': return 'تحلیل سه‌روزه';
+      case 'weekly': return 'تحلیل هفتگی';
+      case 'monthly': return 'تحلیل ماهانه';
+      default: return 'تحلیل';
+    }
+  };
+
+  const formatDate = (dateStr: string) => {
+    try {
+      return moment(dateStr).format('jYYYY/jMM/jDD - HH:mm');
+    } catch {
+      return dateStr;
+    }
+  };
+
   return (
     <View style={{ flex: 1 }}>
-      {msgs.map(m => (
-        <View key={m.id} style={{ backgroundColor: '#fff', padding: 12, borderRadius: 10, marginBottom: 10 }}>
-          <Text style={{ color: '#666', fontSize: 12 }}>{m.type} — {m.created_at}</Text>
-          <Text style={{ marginTop: 6, color: '#333' }}>{m.content}</Text>
+      {loading ? (
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 40 }}>
+          <ActivityIndicator size="large" color="#00D9A5" />
+          <Text style={{ marginTop: 16, color: '#666', fontSize: 14 }}>در حال بارگذاری...</Text>
         </View>
-      ))}
+      ) : msgs.length === 0 ? (
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 40 }}>
+          <Text style={{ fontSize: 48, marginBottom: 16 }}>🤖</Text>
+          <Text style={{ color: '#666', fontSize: 16, textAlign: 'center' }}>
+            هنوز تحلیلی تولید نشده است
+          </Text>
+          <Text style={{ color: '#999', fontSize: 14, textAlign: 'center', marginTop: 8 }}>
+            تحلیل‌های هوش مصنوعی به صورت خودکار تولید می‌شوند
+          </Text>
+        </View>
+      ) : (
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 20 }}>
+          {msgs.map((m, index) => (
+            <View 
+              key={m.id} 
+              style={[
+                styles.aiMessageCard,
+                { 
+                  marginBottom: index === msgs.length - 1 ? 0 : 16,
+                  borderLeftWidth: 4,
+                  borderLeftColor: index % 3 === 0 ? '#00D9A5' : index % 3 === 1 ? '#4361EE' : '#FF6B9D'
+                }
+              ]}
+            >
+              <View style={styles.aiMessageHeader}>
+                <View style={styles.aiBadge}>
+                  <Text style={styles.aiBadgeText}>🤖 AI</Text>
+                </View>
+                <View style={{ flex: 1, alignItems: 'flex-end' }}>
+                  <Text style={styles.aiMessageType}>{getTypeLabel(m.type)}</Text>
+                  <Text style={styles.aiMessageDate}>{formatDate(m.created_at)}</Text>
+                </View>
+              </View>
+              <Text style={styles.aiMessageContent}>{m.content}</Text>
+            </View>
+          ))}
+        </ScrollView>
+      )}
 
-      <TouchableOpacity style={{ marginTop: 10 }} onPress={onClose}>
-        <Text style={{ color: '#4361EE', fontWeight: '700' }}>بستن</Text>
-      </TouchableOpacity>
+      <View style={styles.modalFooter}>
+        <TouchableOpacity 
+          style={styles.modalCloseButton} 
+          onPress={onClose}
+        >
+          <Text style={styles.modalCloseButtonText}>بستن</Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 };
@@ -69,9 +132,8 @@ const HomeScreen: React.FC = () => {
   const [dailyLabels, setDailyLabels] = useState<string[]>([]);
   const [dailyData, setDailyData] = useState<number[]>([]);
   const [latestAnalysis, setLatestAnalysis] = useState<string | null>(null);
+  const [latestAnalysisType, setLatestAnalysisType] = useState<string | null>(null);
   const [analysisModalVisible, setAnalysisModalVisible] = useState(false);
-  const [input, setInput] = useState('');
-  const [lastResult, setLastResult] = useState<any>(null);
 
   // بارگذاری اولیه
   useEffect(() => {
@@ -84,7 +146,10 @@ const HomeScreen: React.FC = () => {
       const profile = await DatabaseService.getUserProfile();
       if (!profile) return;
       const latest = await DatabaseService.getLatestLLMMessage(profile.id);
-      setLatestAnalysis(latest ? latest.content : null);
+      if (latest) {
+        setLatestAnalysis(latest.content);
+        setLatestAnalysisType(latest.type);
+      }
     } catch (e) {
       console.warn('Failed to load latest analysis:', e);
     }
@@ -94,9 +159,7 @@ const HomeScreen: React.FC = () => {
     try {
       const profile = await DatabaseService.getUserProfile();
       if (!profile) {
-        // اگر پروفایل نداشت، به صفحه Onboarding بره
         Alert.alert('خوش آمدید', 'لطفاً ابتدا اطلاعات خود را وارد کنید');
-        // navigation.navigate('Onboarding');
         return;
       }
 
@@ -110,17 +173,26 @@ const HomeScreen: React.FC = () => {
       const total = meals.reduce((sum, meal) => sum + meal.total_calories, 0);
       setTodayTotal(total);
 
-    // prepare daily chart data
-    const labels = meals.map(m => m.time);
-    const data = meals.map(m => Math.round(m.total_calories));
-  // create compact daily summary (sum per meal category)
-  const morning = meals.filter(m => parseInt(m.time.split(':')[0]) >= 5 && parseInt(m.time.split(':')[0]) < 12).reduce((s, m) => s + m.total_calories, 0);
-  const afternoon = meals.filter(m => parseInt(m.time.split(':')[0]) >= 12 && parseInt(m.time.split(':')[0]) < 17).reduce((s, m) => s + m.total_calories, 0);
-  const evening = meals.filter(m => { const h = parseInt(m.time.split(':')[0]); return h >= 17 || h < 5; }).reduce((s, m) => s + m.total_calories, 0);
-  setDailyLabels(['صبح', 'ناهار', 'شام']);
-  setDailyData([Math.round(morning), Math.round(afternoon), Math.round(evening)]);
+      // ایجاد خلاصه روزانه
+      const morning = meals.filter(m => {
+        const hour = parseInt(m.time.split(':')[0]);
+        return hour >= 5 && hour < 12;
+      }).reduce((s, m) => s + m.total_calories, 0);
+      
+      const afternoon = meals.filter(m => {
+        const hour = parseInt(m.time.split(':')[0]);
+        return hour >= 12 && hour < 17;
+      }).reduce((s, m) => s + m.total_calories, 0);
+      
+      const evening = meals.filter(m => {
+        const hour = parseInt(m.time.split(':')[0]);
+        return hour >= 17 || hour < 5;
+      }).reduce((s, m) => s + m.total_calories, 0);
+      
+      setDailyLabels(['صبح', 'ناهار', 'شام']);
+      setDailyData([Math.round(morning), Math.round(afternoon), Math.round(evening)]);
 
-      // بارگذاری داده‌های هفتگی برای نمودار
+      // بارگذاری داده‌های هفتگی
       await loadWeeklyChart(profile.id);
 
     } catch (error) {
@@ -135,7 +207,6 @@ const HomeScreen: React.FC = () => {
 
     const stats = await DatabaseService.getWeeklyStats(userId, startDate, endDate);
 
-    // ایجاد آرایه 7 روزه
     const labels: string[] = [];
     const data: number[] = [];
 
@@ -158,10 +229,8 @@ const HomeScreen: React.FC = () => {
     setIsProcessing(true);
 
     try {
-      // 1. جستجوی غذاها در دیتابیس
       const allFoods = await DatabaseService.searchFoods('');
 
-      // 2. ارسال به Groq برای پارس کردن
       const parseResult = await GroqService.parseUserInputToSQL(
         foodInput,
         allFoods.map(f => ({
@@ -176,23 +245,17 @@ const HomeScreen: React.FC = () => {
         return;
       }
 
-      // 3. ابتدا سعی می‌کنیم کالری را به صورت محلی محاسبه کنیم با استفاده از دیتابیس foods
       let totalCalories = 0;
-      // helper: normalize string
       const normalize = (s: string) => s.trim().toLowerCase();
 
       const findFoodMatch = (detectedName: string) => {
         const d = normalize(detectedName);
-        // exact match
         let found = allFoods.find(f => normalize(f.name) === d);
         if (found) return found;
-        // includes (DB includes detected)
         found = allFoods.find(f => normalize(f.name).includes(d));
         if (found) return found;
-        // reverse includes (detected includes DB name)
         found = allFoods.find(f => d.includes(normalize(f.name)));
         if (found) return found;
-        // token-based: all words in detected present in db name
         const dWords = d.split(/\s+/).filter(Boolean);
         found = allFoods.find(f => {
           const dbn = normalize(f.name);
@@ -201,7 +264,6 @@ const HomeScreen: React.FC = () => {
         return found || null;
       };
 
-      // Compute per-item calories, with unit conversion fallback via GroqService if needed
       const perItemCalories: number[] = [];
       for (const item of parseResult.detected_items) {
         const detectedName = item.food || '';
@@ -211,13 +273,11 @@ const HomeScreen: React.FC = () => {
         let itemCal = 0;
 
         if (matched) {
-          // if units look compatible, multiply directly
           if (unit && matched.unit && unit === matched.unit) {
             itemCal = qty * (matched.calories_per_unit || 0);
           } else if (unit && matched.unit && unit.includes(matched.unit)) {
             itemCal = qty * (matched.calories_per_unit || 0);
           } else {
-            // ask Groq to convert units if API key available
             try {
               const conv = await GroqService.convertUnits(foodInput, qty, unit || 'عدد', matched.unit || '100 گرم');
               if (conv && conv.conversion_factor) {
@@ -226,7 +286,7 @@ const HomeScreen: React.FC = () => {
                 itemCal = qty * (matched.calories_per_unit || 0);
               }
             } catch (e) {
-              console.warn('Unit conversion failed, falling back to direct multiply:', e);
+              console.warn('Unit conversion failed:', e);
               itemCal = qty * (matched.calories_per_unit || 0);
             }
           }
@@ -236,7 +296,6 @@ const HomeScreen: React.FC = () => {
         totalCalories += itemCal;
       }
 
-      // اگر محاسبه محلی صفر بود، از SQL خروجی LLM استفاده کن (فقط به عنوان fallback)
       if (totalCalories === 0 && parseResult.sql_query) {
         try {
           totalCalories = await DatabaseService.executeCalorieQuery(parseResult.sql_query);
@@ -245,17 +304,19 @@ const HomeScreen: React.FC = () => {
         }
       }
 
-      // 4. ذخیره در دیتابیس
       const today = moment().format('jYYYY/jMM/jDD');
       const now = moment().format('HH:mm');
 
-      // Save each detected item with computed calories (distribute proportionally)
-      const perItem = parseResult.detected_items.length > 0 ? totalCalories / parseResult.detected_items.length : 0;
-      for (const item of parseResult.detected_items) {
-        let itemCalories = perItem;
-        const found = allFoods.find(f => f.name.toLowerCase() === item.food.toLowerCase());
-        if (found) {
-          itemCalories = (item.quantity || 0) * (found.calories_per_unit || 0);
+      for (let i = 0; i < parseResult.detected_items.length; i++) {
+        const item = parseResult.detected_items[i];
+        let itemCalories = perItemCalories[i] || 0;
+        
+        if (itemCalories === 0) {
+          const matched = findFoodMatch(item.food || '');
+          if (matched) {
+            const qty = item.quantity || 0;
+            itemCalories = qty * (matched.calories_per_unit || 0);
+          }
         }
 
         await DatabaseService.saveMealEntry({
@@ -270,7 +331,6 @@ const HomeScreen: React.FC = () => {
         });
       }
 
-      // 5. رفرش کردن UI
       await initializeData();
       setFoodInput('');
 
@@ -278,7 +338,7 @@ const HomeScreen: React.FC = () => {
         '✅ ثبت شد!',
         `${Math.round(totalCalories)} کالری اضافه شد.\n\n${parseResult.explanation || ''}`
       );
-      // refresh latest analysis card
+      
       await loadLatestAnalysis();
 
     } catch (error: any) {
@@ -289,7 +349,6 @@ const HomeScreen: React.FC = () => {
     }
   };
 
-  // محاسبه درصد پیشرفت
   const getProgress = () => {
     if (!userProfile) return 0;
     return Math.min((todayTotal / userProfile.daily_calorie_target) * 100, 100);
@@ -300,36 +359,41 @@ const HomeScreen: React.FC = () => {
     return Math.max(userProfile.daily_calorie_target - todayTotal, 0);
   };
 
-  const handleAnalyze = async () => {
-    // فرض: این تابع متن ورودی کاربر را به LLM می‌دهد و خروجی را به صورت parsedFoods دریافت می‌کند.
-    // برای نمونه فرضی از یک parser ساده استفاده می‌کنیم یا اگر در پروژه‌ی شما LLM integration موجود است از آن استفاده شود.
-    // اینجا فقط فرض می‌کنیم parsedFoods آماده است (مثال: [{name:'برنج', quantity:1.5, unit:'بشقاب'}, {name:'ران مرغ', quantity:1, unit:'عدد'}])
-    const parsedFoods = await fakeParse(input);
-    const analysis = await AnalysisService.analyzeFoods(parsedFoods);
-    setLastResult(analysis);
-
-    // ذخیره لاگ غذاها
-    await DatabaseService.insertMeal({
-      input,
-      analysis,
-      createdAt: Date.now(),
-    });
+  const getTypeLabel = (type: string | null) => {
+    if (!type) return '';
+    switch(type) {
+      case 'daily': return 'تحلیل روزانه';
+      case '3day': return 'تحلیل سه‌روزه';
+      case 'weekly': return 'تحلیل هفتگی';
+      case 'monthly': return 'تحلیل ماهانه';
+      default: return 'تحلیل';
+    }
   };
 
   return (
-    <ScrollView style={styles.container}>
-      {/* هدر */}
-      <View style={[styles.header, styles.headerRight]}> 
-        <Text style={styles.headerTitle}>
-          {userProfile ? `سلام، ${userProfile.name} 👋` : 'سلام! 👋'}
-        </Text>
-        <Text style={styles.headerDate}>{moment().format('jYYYY/jMM/jDD')}</Text>
+    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+      {/* هدر با گرادیانت */}
+      <View style={styles.header}>
+        <View style={styles.headerContent}>
+          <Text style={styles.headerTitle}>
+            {userProfile ? `سلام، ${userProfile.name || 'کاربر'} 👋` : 'سلام! 👋'}
+          </Text>
+          <Text style={styles.headerDate}>{moment().format('jYYYY/jMM/jDD')}</Text>
+        </View>
+        <View style={styles.headerGradient} />
       </View>
 
       {/* کارت پیشرفت روزانه */}
       {userProfile && (
         <View style={styles.progressCard}>
-          <Text style={styles.progressTitle}>کالری امروز</Text>
+          <View style={styles.progressHeader}>
+            <Text style={styles.progressTitle}>کالری امروز</Text>
+            <View style={styles.progressBadge}>
+              <Text style={styles.progressBadgeText}>
+                {Math.round(getProgress())}%
+              </Text>
+            </View>
+          </View>
           
           <View style={styles.calorieRow}>
             <Text style={styles.calorieText}>
@@ -339,9 +403,9 @@ const HomeScreen: React.FC = () => {
             <Text style={styles.targetText}>
               {userProfile.daily_calorie_target}
             </Text>
+            <Text style={styles.calorieUnit}> کیلوکالری</Text>
           </View>
 
-          {/* Progress Bar */}
           <View style={styles.progressBarContainer}>
             <View 
               style={[
@@ -352,24 +416,28 @@ const HomeScreen: React.FC = () => {
           </View>
 
           <Text style={styles.remainingText}>
-            {getRemainingCalories()} کالری باقی‌مانده
+            {getRemainingCalories()} کالری باقی‌مانده تا هدف روزانه
           </Text>
         </View>
       )}
 
       {/* ورودی غذا */}
       <View style={styles.inputCard}>
-        <Text style={styles.inputLabel}>چی خوردی؟ 🍽️</Text>
+        <View style={styles.inputHeader}>
+          <Text style={styles.inputLabel}>ثبت وعده غذایی</Text>
+          <Text style={styles.inputSubLabel}>🍽️</Text>
+        </View>
         
         <TextInput
           style={styles.textInput}
-          placeholder="مثلاً: یک نان سنگک و دو تخم مرغ"
+          placeholder="مثال: یک نان سنگک و دو تخم مرغ آب‌پز"
           placeholderTextColor="#999"
           value={foodInput}
           onChangeText={setFoodInput}
           multiline
           numberOfLines={3}
           editable={!isProcessing}
+          textAlignVertical="top"
         />
 
         <TouchableOpacity
@@ -380,39 +448,40 @@ const HomeScreen: React.FC = () => {
           {isProcessing ? (
             <ActivityIndicator color="#fff" />
           ) : (
-            <Text style={styles.submitButtonText}>ثبت غذا</Text>
+            <>
+              <Text style={styles.submitButtonText}>ثبت غذا</Text>
+              <Text style={styles.submitButtonIcon}>✨</Text>
+            </>
           )}
         </TouchableOpacity>
       </View>
 
-      {/* نمودار هفتگی */}
-      {/* weekly chart moved to History tab */}
-
       {/* نمودار روزانه */}
-      {dailyData.length > 0 && (
-        <View style={[styles.chartCard, { marginTop: 10 }]}>
-          <Text style={styles.chartTitle}>خلاصهٔ روزانه</Text>
+      {dailyData.length > 0 && dailyData.some(d => d > 0) && (
+        <View style={styles.chartCard}>
+          <Text style={styles.chartTitle}>توزیع کالری روزانه</Text>
           <BarChart
             data={{ labels: ['', '', ''], datasets: [{ data: dailyData }] }}
             width={screenWidth - 80}
-            height={140}
+            height={160}
             fromZero
             chartConfig={{
-              backgroundColor: '#fff',
-              backgroundGradientFrom: '#fff',
-              backgroundGradientTo: '#fff',
+              backgroundColor: '#FFFFFF',
+              backgroundGradientFrom: '#FFFFFF',
+              backgroundGradientTo: '#FFFFFF',
               decimalPlaces: 0,
-              color: (opacity = 1) => `rgba(67, 97, 238, ${opacity})`,
+              color: (opacity = 1) => `rgba(0, 217, 165, ${opacity})`,
               labelColor: (opacity = 1) => `rgba(0, 0, 0, ${opacity})`,
               style: { borderRadius: 16 },
+              barPercentage: 0.6,
             }}
             style={{ ...styles.chart, paddingRight: 10 }}
-            yAxisLabel={""}
-            yAxisSuffix={""}
+            yAxisLabel=""
+            yAxisSuffix=""
+            showValuesOnTopOfBars
           />
 
-          {/* Custom labels and values under the chart so we can show exact numbers on top of bars */}
-          <View style={[styles.barMetaRow, { width: screenWidth - 80 }] }>
+          <View style={[styles.barMetaRow, { width: screenWidth - 80 }]}>
             {dailyData.map((val, idx) => (
               <View key={idx} style={styles.barCell}>
                 <Text style={styles.barValue}>{Math.round(val)}</Text>
@@ -423,40 +492,91 @@ const HomeScreen: React.FC = () => {
         </View>
       )}
 
-      {/* تحلیل هوش مصنوعی - پیام آخر */}
-      <View style={{ paddingHorizontal: 20, marginTop: 10 }}>
-        <Text style={{ fontSize: 18, fontWeight: '600', color: '#333', marginBottom: 8 }}>تحلیل هوش مصنوعی</Text>
-        <View style={{ backgroundColor: '#fff', borderRadius: 12, padding: 12, minHeight: 80 }}>
-          {latestAnalysis ? (
+      {/* بخش تحلیل هوش مصنوعی - High Tech Design */}
+      <View style={styles.aiAnalysisCard}>
+        <View style={styles.aiCardHeader}>
+          <View style={styles.aiTitleContainer}>
+            <Text style={styles.aiTitleIcon}>🤖</Text>
             <View>
-              <Text numberOfLines={5} style={{ color: '#333' }}>{latestAnalysis}</Text>
-              <TouchableOpacity style={{ marginTop: 8 }} onPress={() => setAnalysisModalVisible(true)}>
-                <Text style={{ color: '#4361EE', fontWeight: '600' }}>دیدن همه پیام‌ها</Text>
-              </TouchableOpacity>
+              <Text style={styles.aiTitle}>تحلیل هوش مصنوعی</Text>
+              <Text style={styles.aiSubtitle}>بینش‌های شخصی‌سازی شده</Text>
             </View>
-          ) : (
-            <Text style={{ color: '#666' }}>هنوز تحلیلی تولید نشده</Text>
-          )}
+          </View>
+          <View style={styles.aiGlow} />
         </View>
+
+        {latestAnalysis ? (
+          <View style={styles.aiContentContainer}>
+            {latestAnalysisType && (
+              <View style={styles.aiTypeBadge}>
+                <Text style={styles.aiTypeBadgeText}>{getTypeLabel(latestAnalysisType)}</Text>
+              </View>
+            )}
+            <View style={styles.aiMessageBox}>
+              <Text 
+                style={styles.aiMessageText}
+                numberOfLines={6}
+              >
+                {latestAnalysis}
+              </Text>
+            </View>
+            <TouchableOpacity 
+              style={styles.aiViewAllButton}
+              onPress={() => setAnalysisModalVisible(true)}
+            >
+              <Text style={styles.aiViewAllButtonText}>مشاهده همه تحلیل‌ها</Text>
+              <Text style={styles.aiViewAllButtonIcon}>→</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <View style={styles.aiEmptyState}>
+            <Text style={styles.aiEmptyIcon}>⚡</Text>
+            <Text style={styles.aiEmptyText}>در حال تولید تحلیل...</Text>
+            <Text style={styles.aiEmptySubtext}>
+              تحلیل‌های هوش مصنوعی به صورت خودکار تولید می‌شوند
+            </Text>
+          </View>
+        )}
       </View>
 
-      {/* Modal for all messages */}
-      <Modal visible={analysisModalVisible} animationType="slide" onRequestClose={() => setAnalysisModalVisible(false)}>
-        <View style={{ flex: 1, padding: 20, backgroundColor: '#f7fafc' }}>
-          <Text style={{ fontSize: 20, fontWeight: '700', marginBottom: 12 }}>پیام‌های تحلیل</Text>
-          <ScrollView>
-            {/* fetch and render all messages */}
-            <AllLLMMessagesList onClose={() => setAnalysisModalVisible(false)} />
-          </ScrollView>
+      {/* Modal برای همه تحلیل‌ها */}
+      <Modal 
+        visible={analysisModalVisible} 
+        animationType="slide" 
+        onRequestClose={() => setAnalysisModalVisible(false)}
+        transparent={false}
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <View style={styles.modalHeaderContent}>
+              <Text style={styles.modalHeaderIcon}>🤖</Text>
+              <View>
+                <Text style={styles.modalHeaderTitle}>همه تحلیل‌های هوش مصنوعی</Text>
+                <Text style={styles.modalHeaderSubtitle}>تاریخچه کامل تحلیل‌های شما</Text>
+              </View>
+            </View>
+            <TouchableOpacity 
+              style={styles.modalCloseIcon}
+              onPress={() => setAnalysisModalVisible(false)}
+            >
+              <Text style={styles.modalCloseIconText}>✕</Text>
+            </TouchableOpacity>
+          </View>
+          <AllLLMMessagesList onClose={() => setAnalysisModalVisible(false)} />
         </View>
       </Modal>
 
       {/* لیست وعده‌های امروز */}
       {todayMeals.length > 0 && (
         <View style={styles.mealsCard}>
-          <Text style={styles.mealsTitle}>وعده‌های امروز ({todayMeals.length})</Text>
+          <View style={styles.mealsHeader}>
+            <Text style={styles.mealsTitle}>وعده‌های امروز</Text>
+            <View style={styles.mealsCountBadge}>
+              <Text style={styles.mealsCountText}>{todayMeals.length}</Text>
+            </View>
+          </View>
           
-          {todayMeals.map((meal, index) => (
+          {todayMeals.map((meal) => (
             <View key={meal.id} style={styles.mealItem}>
               <View style={styles.mealLeft}>
                 <Text style={styles.mealTime}>{meal.time}</Text>
@@ -465,165 +585,226 @@ const HomeScreen: React.FC = () => {
                 </Text>
               </View>
               
-              <Text style={styles.mealCalories}>
-                {Math.round(meal.total_calories)} کالری
-              </Text>
+              <View style={styles.mealCaloriesContainer}>
+                <Text style={styles.mealCalories}>
+                  {Math.round(meal.total_calories)}
+                </Text>
+                <Text style={styles.mealCaloriesUnit}>کالری</Text>
+              </View>
             </View>
           ))}
         </View>
       )}
 
-      <View style={{ height: 30 }} />
+      <View style={{ height: 40 }} />
     </ScrollView>
   );
 };
 
-async function fakeParse(text: string) {
-  // فقط مثال؛ در پروژه‌تان حتماً از LLM یا parser خود استفاده کنید
-  // برای ورودی: "یک بشقاب و نصف برنج و یک ران مرغ" خروجی زیر تولید می‌کنیم:
-  return [
-    { name: 'برنج', quantity: 1.5, unit: 'بشقاب' },
-    { name: 'ران مرغ', quantity: 1, unit: 'عدد' },
-  ];
-}
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f7fa',
+    backgroundColor: '#F0F9F7',
   },
   header: {
-    padding: 20,
-    paddingTop: 50,
-    backgroundColor: '#4361EE',
+    paddingTop: 60,
+    paddingBottom: 30,
+    paddingHorizontal: 20,
+    backgroundColor: '#00D9A5',
+    borderBottomLeftRadius: 30,
+    borderBottomRightRadius: 30,
+    position: 'relative',
+    overflow: 'hidden',
   },
-  headerRight: {
+  headerGradient: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(67, 97, 238, 0.1)',
+  },
+  headerContent: {
     alignItems: 'flex-end',
+    zIndex: 1,
   },
   headerTitle: {
     fontSize: 32,
-    fontWeight: 'bold',
-    color: '#fff',
-    marginBottom: 5,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    marginBottom: 8,
+    textAlign: 'right',
   },
   headerDate: {
     fontSize: 16,
-    color: '#E0E7FF',
+    color: '#FFFFFF',
+    opacity: 0.9,
+    textAlign: 'right',
   },
   progressCard: {
     margin: 20,
+    marginTop: 20,
     marginBottom: 15,
-    padding: 25,
-    backgroundColor: '#fff',
-    borderRadius: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
+    padding: 24,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    shadowColor: '#00D9A5',
+    shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 3,
+    shadowRadius: 12,
+    elevation: 5,
+  },
+  progressHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
   },
   progressTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 15,
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#1A1A1A',
+    textAlign: 'right',
+  },
+  progressBadge: {
+    backgroundColor: '#E8F8F5',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
+  progressBadgeText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#00D9A5',
   },
   calorieRow: {
     flexDirection: 'row',
     alignItems: 'baseline',
-    marginBottom: 15,
+    marginBottom: 20,
+    justifyContent: 'flex-end',
   },
   calorieText: {
-    fontSize: 48,
-    fontWeight: 'bold',
-    color: '#4361EE',
+    fontSize: 52,
+    fontWeight: '800',
+    color: '#00D9A5',
+    textAlign: 'right',
   },
   calorieSeparator: {
-    fontSize: 24,
-    color: '#999',
+    fontSize: 28,
+    color: '#CCCCCC',
+    marginHorizontal: 8,
   },
   targetText: {
-    fontSize: 28,
-    color: '#666',
+    fontSize: 32,
+    color: '#666666',
+    fontWeight: '600',
+  },
+  calorieUnit: {
+    fontSize: 16,
+    color: '#999999',
+    marginRight: 8,
   },
   progressBarContainer: {
-    height: 12,
-    backgroundColor: '#E5E9F2',
-    borderRadius: 6,
+    height: 14,
+    backgroundColor: '#E8F8F5',
+    borderRadius: 10,
     overflow: 'hidden',
-    marginBottom: 10,
+    marginBottom: 16,
   },
   progressBarFill: {
     height: '100%',
-    backgroundColor: '#4361EE',
-    borderRadius: 6,
+    backgroundColor: '#00D9A5',
+    borderRadius: 10,
   },
   remainingText: {
-    fontSize: 14,
-    color: '#666',
+    fontSize: 15,
+    color: '#666666',
     textAlign: 'center',
+    fontWeight: '500',
   },
   inputCard: {
     margin: 20,
     marginTop: 0,
-    padding: 20,
-    backgroundColor: '#fff',
-    borderRadius: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
+    padding: 24,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    shadowColor: '#4361EE',
+    shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 3,
+    shadowRadius: 12,
+    elevation: 5,
+  },
+  inputHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
   },
   inputLabel: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 12,
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#1A1A1A',
+    textAlign: 'right',
+  },
+  inputSubLabel: {
+    fontSize: 24,
   },
   textInput: {
-    borderWidth: 1,
-    borderColor: '#E5E9F2',
-    borderRadius: 12,
-    padding: 15,
+    borderWidth: 2,
+    borderColor: '#E8F8F5',
+    borderRadius: 16,
+    padding: 16,
     fontSize: 16,
-    color: '#333',
-    minHeight: 80,
-    textAlignVertical: 'top',
-    backgroundColor: '#F9FAFB',
-    marginBottom: 15,
+    color: '#1A1A1A',
+    minHeight: 100,
+    textAlign: 'right',
+    backgroundColor: '#FAFFFE',
+    marginBottom: 20,
   },
   submitButton: {
-    backgroundColor: '#4361EE',
-    padding: 16,
-    borderRadius: 12,
+    backgroundColor: '#00D9A5',
+    padding: 18,
+    borderRadius: 16,
+    flexDirection: 'row',
+    justifyContent: 'center',
     alignItems: 'center',
+    shadowColor: '#00D9A5',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
   },
   submitButtonDisabled: {
-    backgroundColor: '#A0AEC0',
+    backgroundColor: '#CCCCCC',
+    shadowOpacity: 0,
   },
   submitButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '700',
+    marginLeft: 8,
+  },
+  submitButtonIcon: {
+    fontSize: 20,
   },
   chartCard: {
     margin: 20,
     marginTop: 0,
-    padding: 20,
-    backgroundColor: '#fff',
-    borderRadius: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
+    padding: 24,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    shadowColor: '#4361EE',
+    shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 3,
+    shadowRadius: 12,
+    elevation: 5,
   },
   chartTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 15,
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#1A1A1A',
+    marginBottom: 20,
+    textAlign: 'right',
   },
   chart: {
     marginVertical: 8,
@@ -633,70 +814,338 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: 8,
+    marginTop: 16,
   },
   barCell: {
     alignItems: 'center',
     width: (screenWidth - 80) / 3,
   },
   barValue: {
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: '700',
-    color: '#333',
-    marginBottom: 4,
+    color: '#00D9A5',
+    marginBottom: 6,
   },
   barLabel: {
-    fontSize: 12,
-    color: '#666',
+    fontSize: 14,
+    color: '#666666',
+    fontWeight: '500',
   },
-  chartLegend: {
-    fontSize: 12,
-    color: '#666',
-    textAlign: 'center',
-    marginTop: 10,
-  },
-  mealsCard: {
+  // AI Analysis Card Styles - High Tech
+  aiAnalysisCard: {
     margin: 20,
     marginTop: 0,
-    padding: 20,
-    backgroundColor: '#fff',
+    padding: 24,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    shadowColor: '#4361EE',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.15,
+    shadowRadius: 16,
+    elevation: 8,
+    borderWidth: 1,
+    borderColor: '#E8F0FF',
+  },
+  aiCardHeader: {
+    marginBottom: 20,
+    position: 'relative',
+  },
+  aiTitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+  },
+  aiTitleIcon: {
+    fontSize: 32,
+    marginLeft: 12,
+  },
+  aiTitle: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#1A1A1A',
+    textAlign: 'right',
+    marginBottom: 4,
+  },
+  aiSubtitle: {
+    fontSize: 14,
+    color: '#666666',
+    textAlign: 'right',
+    fontWeight: '500',
+  },
+  aiGlow: {
+    position: 'absolute',
+    top: -10,
+    right: -10,
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: 'rgba(67, 97, 238, 0.1)',
+    opacity: 0.5,
+  },
+  aiContentContainer: {
+    marginTop: 8,
+  },
+  aiTypeBadge: {
+    alignSelf: 'flex-end',
+    backgroundColor: '#E8F0FF',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+    marginBottom: 12,
+  },
+  aiTypeBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#4361EE',
+  },
+  aiMessageBox: {
+    backgroundColor: '#F8FAFF',
+    borderRadius: 16,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: '#E8F0FF',
+    marginBottom: 16,
+  },
+  aiMessageText: {
+    fontSize: 15,
+    color: '#1A1A1A',
+    lineHeight: 24,
+    textAlign: 'right',
+    fontWeight: '400',
+  },
+  aiViewAllButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#4361EE',
+    padding: 14,
+    borderRadius: 14,
+    shadowColor: '#4361EE',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  aiViewAllButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '700',
+    marginLeft: 8,
+  },
+  aiViewAllButtonIcon: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  aiEmptyState: {
+    alignItems: 'center',
+    padding: 40,
+  },
+  aiEmptyIcon: {
+    fontSize: 48,
+    marginBottom: 16,
+  },
+  aiEmptyText: {
+    fontSize: 16,
+    color: '#666666',
+    fontWeight: '600',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  aiEmptySubtext: {
+    fontSize: 14,
+    color: '#999999',
+    textAlign: 'center',
+  },
+  // Modal Styles
+  modalContainer: {
+    flex: 1,
+    backgroundColor: '#F0F9F7',
+  },
+  modalHeader: {
+    paddingTop: 60,
+    paddingBottom: 20,
+    paddingHorizontal: 20,
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E8F8F5',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  modalHeaderContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  modalHeaderIcon: {
+    fontSize: 32,
+    marginLeft: 12,
+  },
+  modalHeaderTitle: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#1A1A1A',
+    textAlign: 'right',
+    marginBottom: 4,
+  },
+  modalHeaderSubtitle: {
+    fontSize: 14,
+    color: '#666666',
+    textAlign: 'right',
+  },
+  modalCloseIcon: {
+    width: 40,
+    height: 40,
     borderRadius: 20,
+    backgroundColor: '#F0F0F0',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalCloseIconText: {
+    fontSize: 20,
+    color: '#666666',
+    fontWeight: '600',
+  },
+  modalFooter: {
+    padding: 20,
+    backgroundColor: '#FFFFFF',
+    borderTopWidth: 1,
+    borderTopColor: '#E8F8F5',
+  },
+  modalCloseButton: {
+    backgroundColor: '#00D9A5',
+    padding: 16,
+    borderRadius: 14,
+    alignItems: 'center',
+  },
+  modalCloseButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  // AI Message Card in Modal
+  aiMessageCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 8,
     elevation: 3,
   },
+  aiMessageHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 12,
+  },
+  aiBadge: {
+    backgroundColor: '#E8F0FF',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  aiBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#4361EE',
+  },
+  aiMessageType: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#1A1A1A',
+    textAlign: 'right',
+    marginBottom: 4,
+  },
+  aiMessageDate: {
+    fontSize: 12,
+    color: '#999999',
+    textAlign: 'right',
+  },
+  aiMessageContent: {
+    fontSize: 15,
+    color: '#1A1A1A',
+    lineHeight: 24,
+    textAlign: 'right',
+  },
+  mealsCard: {
+    margin: 20,
+    marginTop: 0,
+    padding: 24,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    shadowColor: '#00D9A5',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 5,
+  },
+  mealsHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
   mealsTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 15,
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#1A1A1A',
+    textAlign: 'right',
+  },
+  mealsCountBadge: {
+    backgroundColor: '#E8F8F5',
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  mealsCountText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#00D9A5',
   },
   mealItem: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 12,
+    paddingVertical: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#F0F0F0',
   },
   mealLeft: {
     flex: 1,
+    alignItems: 'flex-end',
   },
   mealTime: {
-    fontSize: 12,
-    color: '#999',
-    marginBottom: 4,
+    fontSize: 13,
+    color: '#999999',
+    marginBottom: 6,
+    fontWeight: '500',
   },
   mealName: {
     fontSize: 16,
-    color: '#333',
+    color: '#1A1A1A',
+    fontWeight: '600',
+    textAlign: 'right',
+  },
+  mealCaloriesContainer: {
+    alignItems: 'flex-start',
+    marginLeft: 16,
   },
   mealCalories: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#4361EE',
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#00D9A5',
+  },
+  mealCaloriesUnit: {
+    fontSize: 12,
+    color: '#999999',
+    marginTop: 2,
   },
 });
 
