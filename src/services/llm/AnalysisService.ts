@@ -75,3 +75,4 @@ class AnalysisService {
 }
 
 export default new AnalysisService();
+
