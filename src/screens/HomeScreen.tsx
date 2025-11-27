@@ -359,6 +359,34 @@ const HomeScreen: React.FC = () => {
     return Math.max(userProfile.daily_calorie_target - todayTotal, 0);
   };
 
+  // حذف وعده غذایی
+  const handleDeleteMeal = async (mealId: number) => {
+    Alert.alert(
+      'حذف وعده غذایی',
+      'آیا مطمئن هستید که می‌خواهید این وعده را حذف کنید؟',
+      [
+        {
+          text: 'انصراف',
+          style: 'cancel',
+        },
+        {
+          text: 'حذف',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await DatabaseService.deleteMealEntry(mealId);
+              await initializeData();
+              Alert.alert('✅', 'وعده غذایی با موفقیت حذف شد');
+            } catch (error) {
+              console.error('Error deleting meal:', error);
+              Alert.alert('خطا', 'مشکلی در حذف وعده غذایی پیش آمد');
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const getTypeLabel = (type: string | null) => {
     if (!type) return '';
     switch(type) {
@@ -585,11 +613,19 @@ const HomeScreen: React.FC = () => {
                 </Text>
               </View>
               
-              <View style={styles.mealCaloriesContainer}>
-                <Text style={styles.mealCalories}>
-                  {Math.round(meal.total_calories)}
-                </Text>
-                <Text style={styles.mealCaloriesUnit}>کالری</Text>
+              <View style={styles.mealRightContainer}>
+                <View style={styles.mealCaloriesContainer}>
+                  <Text style={styles.mealCalories}>
+                    {Math.round(meal.total_calories)}
+                  </Text>
+                  <Text style={styles.mealCaloriesUnit}>کالری</Text>
+                </View>
+                <TouchableOpacity
+                  style={styles.deleteButton}
+                  onPress={() => handleDeleteMeal(meal.id)}
+                >
+                  <Text style={styles.deleteButtonText}>🗑️</Text>
+                </TouchableOpacity>
               </View>
             </View>
           ))}
@@ -1133,6 +1169,10 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     textAlign: 'right',
   },
+  mealRightContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   mealCaloriesContainer: {
     alignItems: 'flex-start',
     marginLeft: 16,
@@ -1146,6 +1186,15 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#999999',
     marginTop: 2,
+  },
+  deleteButton: {
+    padding: 8,
+    borderRadius: 8,
+    backgroundColor: '#FFF5F5',
+    marginLeft: 8,
+  },
+  deleteButtonText: {
+    fontSize: 20,
   },
 });
 

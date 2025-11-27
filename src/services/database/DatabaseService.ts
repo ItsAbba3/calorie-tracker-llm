@@ -551,6 +551,15 @@ class DatabaseService {
     return results;
   }
 
+  async deleteMealEntry(mealId: number): Promise<void> {
+    if (!this.db) throw new Error('Database not initialized');
+    
+    await this.db.runAsync(
+      'DELETE FROM meal_entries WHERE id = ?',
+      mealId
+    );
+  }
+
   async getWeeklyStats(userId: number, startDate: string, endDate: string): Promise<any[]> {
     if (!this.db) throw new Error('Database not initialized');
 
@@ -612,6 +621,7 @@ export default {
   executeCalorieQuery: databaseServiceInstance.executeCalorieQuery.bind(databaseServiceInstance),
   saveMealEntry: databaseServiceInstance.saveMealEntry.bind(databaseServiceInstance),
   getMealsForDate: databaseServiceInstance.getMealsForDate.bind(databaseServiceInstance),
+  deleteMealEntry: databaseServiceInstance.deleteMealEntry.bind(databaseServiceInstance),
   getWeeklyStats: databaseServiceInstance.getWeeklyStats.bind(databaseServiceInstance),
   addLLMMessage: databaseServiceInstance.addLLMMessage.bind(databaseServiceInstance),
   getLatestLLMMessage: databaseServiceInstance.getLatestLLMMessage.bind(databaseServiceInstance),
