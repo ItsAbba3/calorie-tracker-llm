@@ -1,5 +1,5 @@
 // src/services/llm/AnalysisService.ts
-import DatabaseService from '../services/database/DatabaseService';
+import DatabaseService from '../database/DatabaseService';
 import GroqService from './GroqService';
 import * as Notifications from 'expo-notifications';
 import moment from 'moment-jalaali';

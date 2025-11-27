@@ -598,8 +598,30 @@ class DatabaseService {
   }
 }
 
+// Create a singleton instance
+const databaseServiceInstance = new DatabaseService();
+
+// Export the instance with legacy functions
 export default {
-  ...new DatabaseService(),
+  // DatabaseService class methods
+  init: databaseServiceInstance.init.bind(databaseServiceInstance),
+  saveUserProfile: databaseServiceInstance.saveUserProfile.bind(databaseServiceInstance),
+  updateUserProfile: databaseServiceInstance.updateUserProfile.bind(databaseServiceInstance),
+  getUserProfile: databaseServiceInstance.getUserProfile.bind(databaseServiceInstance),
+  searchFoods: databaseServiceInstance.searchFoods.bind(databaseServiceInstance),
+  executeCalorieQuery: databaseServiceInstance.executeCalorieQuery.bind(databaseServiceInstance),
+  saveMealEntry: databaseServiceInstance.saveMealEntry.bind(databaseServiceInstance),
+  getMealsForDate: databaseServiceInstance.getMealsForDate.bind(databaseServiceInstance),
+  getWeeklyStats: databaseServiceInstance.getWeeklyStats.bind(databaseServiceInstance),
+  addLLMMessage: databaseServiceInstance.addLLMMessage.bind(databaseServiceInstance),
+  getLatestLLMMessage: databaseServiceInstance.getLatestLLMMessage.bind(databaseServiceInstance),
+  getAllLLMMessages: databaseServiceInstance.getAllLLMMessages.bind(databaseServiceInstance),
+  addWeightEntry: databaseServiceInstance.addWeightEntry.bind(databaseServiceInstance),
+  getWeightHistory: databaseServiceInstance.getWeightHistory.bind(databaseServiceInstance),
+  clearAllData: databaseServiceInstance.clearAllData.bind(databaseServiceInstance),
+  close: databaseServiceInstance.close.bind(databaseServiceInstance),
+  backupUserProfile: databaseServiceInstance.backupUserProfile.bind(databaseServiceInstance),
+  // Legacy AsyncStorage functions
   getProfile,
   saveProfile,
   getFoodDb,
