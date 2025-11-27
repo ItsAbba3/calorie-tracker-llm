@@ -1,8 +1,9 @@
 // App.tsx - EXPO VERSION
 import React, { useEffect, useState } from 'react';
-import { I18nManager, View, ActivityIndicator, StyleSheet } from 'react-native';
+import { I18nManager, View, ActivityIndicator, StyleSheet, Text } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import DatabaseService from './src/services/database/DatabaseService';
 import NotificationService from './src/services/notification/NotificationService';
 import AnalysisService from './src/services/llm/AnalysisService';
@@ -16,6 +17,69 @@ I18nManager.allowRTL(true);
 I18nManager.forceRTL(true);
 
 const Stack = createNativeStackNavigator();
+const Tab = createBottomTabNavigator();
+
+// Bottom Tab Navigator برای صفحات اصلی
+function MainTabs() {
+  return (
+    <Tab.Navigator
+      screenOptions={{
+        headerShown: false,
+        tabBarActiveTintColor: '#00D9A5',
+        tabBarInactiveTintColor: '#999',
+        tabBarStyle: {
+          backgroundColor: '#FFFFFF',
+          borderTopWidth: 1,
+          borderTopColor: '#E8F8F5',
+          height: 60,
+          paddingBottom: 8,
+          paddingTop: 8,
+        },
+        tabBarLabelStyle: {
+          fontSize: 12,
+          fontWeight: '600',
+        },
+      }}
+    >
+      <Tab.Screen
+        name="HomeTab"
+        component={HomeScreen}
+        options={{
+          tabBarLabel: 'خانه',
+          tabBarIcon: ({ color }) => (
+            <View style={{ width: 24, height: 24, alignItems: 'center', justifyContent: 'center' }}>
+              <Text style={{ fontSize: 24, color }}>🏠</Text>
+            </View>
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="HistoryTab"
+        component={HistoryScreen}
+        options={{
+          tabBarLabel: 'تاریخچه',
+          tabBarIcon: ({ color }) => (
+            <View style={{ width: 24, height: 24, alignItems: 'center', justifyContent: 'center' }}>
+              <Text style={{ fontSize: 24, color }}>📊</Text>
+            </View>
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="SettingsTab"
+        component={SettingsScreen}
+        options={{
+          tabBarLabel: 'تنظیمات',
+          tabBarIcon: ({ color }) => (
+            <View style={{ width: 24, height: 24, alignItems: 'center', justifyContent: 'center' }}>
+              <Text style={{ fontSize: 24, color }}>⚙️</Text>
+            </View>
+          ),
+        }}
+      />
+    </Tab.Navigator>
+  );
+}
 
 export default function App() {
   const [isReady, setIsReady] = useState(false);
@@ -91,7 +155,7 @@ export default function App() {
   if (!isReady) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#4361EE" />
+        <ActivityIndicator size="large" color="#00D9A5" />
       </View>
     );
   }
@@ -99,11 +163,11 @@ export default function App() {
   return (
     <NavigationContainer>
       <Stack.Navigator
-        initialRouteName={hasProfile ? 'Home' : 'Onboarding'}
+        initialRouteName={hasProfile ? 'MainTabs' : 'Onboarding'}
         screenOptions={{ headerShown: false }}
       >
         <Stack.Screen name="Onboarding" component={OnboardingScreen} />
-        <Stack.Screen name="Home" component={HomeScreen} />
+        <Stack.Screen name="MainTabs" component={MainTabs} />
       </Stack.Navigator>
     </NavigationContainer>
   );
@@ -114,6 +178,6 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#fff',
+    backgroundColor: '#F0F9F7',
   },
 });

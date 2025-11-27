@@ -9,6 +9,7 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  ScrollView,
 } from 'react-native';
 import DatabaseService from '../services/database/DatabaseService';
 
@@ -17,6 +18,8 @@ export default function OnboardingScreen({ navigation }: any) {
   const [age, setAge] = useState('');
   const [height, setHeight] = useState('');
   const [weight, setWeight] = useState('');
+  const [gender, setGender] = useState<'male' | 'female'>('male');
+  const [goal, setGoal] = useState<'lose' | 'gain' | 'maintain'>('maintain');
 
   const save = async () => {
     // اعتبارسنجی ورودی‌ها
@@ -30,12 +33,12 @@ export default function OnboardingScreen({ navigation }: any) {
       await DatabaseService.saveUserProfile({
         name: name.trim(),
         age: parseInt(age) || 25,
-        gender: 'male', // پیش‌فرض - می‌توان بعداً در تنظیمات تغییر داد
+        gender: gender,
         weight: parseFloat(weight) || 70,
         height: parseFloat(height) || 170,
-        goal: 'maintain', // پیش‌فرض - می‌توان بعداً در تنظیمات تغییر داد
+        goal: goal,
       });
-      navigation.replace('Home');
+      navigation.replace('MainTabs');
     } catch (error: any) {
       console.error('Error saving profile:', error);
       Alert.alert('خطا', 'مشکلی در ذخیره اطلاعات پیش آمد. لطفاً دوباره تلاش کنید.');
@@ -47,48 +50,112 @@ export default function OnboardingScreen({ navigation }: any) {
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <View style={styles.container}>
-        <Text style={styles.title}>خوش آمدی! بیایید پروفایل شما را کامل کنیم</Text>
+      <ScrollView 
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.content}>
+          <Text style={styles.title}>خوش آمدید! 🎉</Text>
+          <Text style={styles.subtitle}>بیایید پروفایل شما را کامل کنیم</Text>
 
-        <Text style={styles.label}>نام</Text>
-        <TextInput
-          style={styles.input}
-          value={name}
-          onChangeText={setName}
-          placeholder="مثال: علی"
-        />
+          <View style={styles.form}>
+            <Text style={styles.label}>نام</Text>
+            <TextInput
+              style={styles.input}
+              value={name}
+              onChangeText={setName}
+              placeholder="مثال: علی"
+              placeholderTextColor="#999"
+              textAlign="right"
+            />
 
-        <Text style={styles.label}>سن</Text>
-        <TextInput
-          style={styles.input}
-          value={age}
-          onChangeText={setAge}
-          keyboardType="numeric"
-          placeholder="مثال: ۳۰"
-        />
+            <Text style={styles.label}>سن</Text>
+            <TextInput
+              style={styles.input}
+              value={age}
+              onChangeText={setAge}
+              keyboardType="numeric"
+              placeholder="مثال: ۳۰"
+              placeholderTextColor="#999"
+              textAlign="right"
+            />
 
-        <Text style={styles.label}>قد (سانتیمتر)</Text>
-        <TextInput
-          style={styles.input}
-          value={height}
-          onChangeText={setHeight}
-          keyboardType="numeric"
-          placeholder="مثال: ۱۷۵"
-        />
+            <Text style={styles.label}>قد (سانتیمتر)</Text>
+            <TextInput
+              style={styles.input}
+              value={height}
+              onChangeText={setHeight}
+              keyboardType="numeric"
+              placeholder="مثال: ۱۷۵"
+              placeholderTextColor="#999"
+              textAlign="right"
+            />
 
-        <Text style={styles.label}>وزن (کیلو)</Text>
-        <TextInput
-          style={styles.input}
-          value={weight}
-          onChangeText={setWeight}
-          keyboardType="numeric"
-          placeholder="مثال: ۷۰"
-        />
+            <Text style={styles.label}>وزن (کیلوگرم)</Text>
+            <TextInput
+              style={styles.input}
+              value={weight}
+              onChangeText={setWeight}
+              keyboardType="numeric"
+              placeholder="مثال: ۷۰"
+              placeholderTextColor="#999"
+              textAlign="right"
+            />
 
-        <TouchableOpacity onPress={save} style={styles.button}>
-          <Text style={styles.buttonText}>شروع سالم و های‌تِک</Text>
-        </TouchableOpacity>
-      </View>
+            <Text style={styles.label}>جنسیت</Text>
+            <View style={styles.radioGroup}>
+              <TouchableOpacity
+                style={[styles.radioButton, gender === 'male' && styles.radioButtonActive]}
+                onPress={() => setGender('male')}
+              >
+                <Text style={[styles.radioText, gender === 'male' && styles.radioTextActive]}>
+                  مرد
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.radioButton, gender === 'female' && styles.radioButtonActive]}
+                onPress={() => setGender('female')}
+              >
+                <Text style={[styles.radioText, gender === 'female' && styles.radioTextActive]}>
+                  زن
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.label}>هدف شما</Text>
+            <View style={styles.goalGroup}>
+              <TouchableOpacity
+                style={[styles.goalButton, goal === 'lose' && styles.goalButtonActive]}
+                onPress={() => setGoal('lose')}
+              >
+                <Text style={[styles.goalText, goal === 'lose' && styles.goalTextActive]}>
+                  کاهش وزن
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.goalButton, goal === 'maintain' && styles.goalButtonActive]}
+                onPress={() => setGoal('maintain')}
+              >
+                <Text style={[styles.goalText, goal === 'maintain' && styles.goalTextActive]}>
+                  حفظ وزن
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.goalButton, goal === 'gain' && styles.goalButtonActive]}
+                onPress={() => setGoal('gain')}
+              >
+                <Text style={[styles.goalText, goal === 'gain' && styles.goalTextActive]}>
+                  افزایش وزن
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            <TouchableOpacity onPress={save} style={styles.button}>
+              <Text style={styles.buttonText}>شروع سالم و های‌تک ✨</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 }
@@ -96,41 +163,127 @@ export default function OnboardingScreen({ navigation }: any) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#F0F9F7',
+  },
+  scrollContent: {
+    flexGrow: 1,
+  },
+  content: {
+    flex: 1,
     padding: 24,
-    backgroundColor: '#f6fff9',
     alignItems: 'flex-end',
   },
   title: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#0b6e4f',
-    marginBottom: 20,
+    fontSize: 32,
+    fontWeight: '800',
+    color: '#00D9A5',
+    marginBottom: 8,
     textAlign: 'right',
+    width: '100%',
+  },
+  subtitle: {
+    fontSize: 18,
+    color: '#666',
+    marginBottom: 32,
+    textAlign: 'right',
+    width: '100%',
+  },
+  form: {
+    width: '100%',
+    alignItems: 'flex-end',
   },
   label: {
-    alignSelf: 'stretch',
-    color: '#0b6e4f',
-    marginTop: 8,
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1A1A1A',
+    marginTop: 20,
+    marginBottom: 8,
     textAlign: 'right',
+    width: '100%',
   },
   input: {
     width: '100%',
-    backgroundColor: '#fff',
-    borderRadius: 10,
-    padding: 12,
-    marginTop: 6,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 16,
+    fontSize: 16,
+    color: '#1A1A1A',
     textAlign: 'right',
+    borderWidth: 2,
+    borderColor: '#E8F8F5',
   },
-  button: {
-    marginTop: 20,
-    backgroundColor: '#0b8f67',
-    paddingVertical: 14,
+  radioGroup: {
+    flexDirection: 'row',
+    width: '100%',
+    justifyContent: 'flex-end',
+    gap: 12,
+  },
+  radioButton: {
+    paddingVertical: 12,
     paddingHorizontal: 24,
     borderRadius: 12,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 2,
+    borderColor: '#E8F8F5',
+    minWidth: 100,
+    alignItems: 'center',
+  },
+  radioButtonActive: {
+    backgroundColor: '#00D9A5',
+    borderColor: '#00D9A5',
+  },
+  radioText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#666',
+  },
+  radioTextActive: {
+    color: '#FFFFFF',
+  },
+  goalGroup: {
+    width: '100%',
+    gap: 12,
+  },
+  goalButton: {
+    width: '100%',
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    borderRadius: 16,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 2,
+    borderColor: '#E8F8F5',
+    alignItems: 'flex-end',
+  },
+  goalButtonActive: {
+    backgroundColor: '#00D9A5',
+    borderColor: '#00D9A5',
+  },
+  goalText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#666',
+    textAlign: 'right',
+  },
+  goalTextActive: {
+    color: '#FFFFFF',
+  },
+  button: {
+    marginTop: 32,
+    width: '100%',
+    backgroundColor: '#00D9A5',
+    paddingVertical: 18,
+    paddingHorizontal: 24,
+    borderRadius: 16,
+    alignItems: 'center',
+    shadowColor: '#00D9A5',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
   },
   buttonText: {
-    color: '#fff',
+    color: '#FFFFFF',
     fontWeight: '700',
-    textAlign: 'center',
+    fontSize: 18,
   },
 });
