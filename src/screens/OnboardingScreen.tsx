@@ -64,7 +64,7 @@ export default function OnboardingScreen({ navigation }: any) {
               style={styles.input}
               value={name}
               onChangeText={setName}
-              placeholder="مثال: علی"
+              placeholder="مثال: کیمیا"
               placeholderTextColor="#999"
               textAlign="right"
             />
@@ -75,7 +75,7 @@ export default function OnboardingScreen({ navigation }: any) {
               value={age}
               onChangeText={setAge}
               keyboardType="numeric"
-              placeholder="مثال: ۳۰"
+              placeholder="مثال: 24"
               placeholderTextColor="#999"
               textAlign="right"
             />
@@ -86,7 +86,7 @@ export default function OnboardingScreen({ navigation }: any) {
               value={height}
               onChangeText={setHeight}
               keyboardType="numeric"
-              placeholder="مثال: ۱۷۵"
+              placeholder="مثال: 175"
               placeholderTextColor="#999"
               textAlign="right"
             />
@@ -105,7 +105,7 @@ export default function OnboardingScreen({ navigation }: any) {
             <Text style={styles.label}>جنسیت</Text>
             <View style={styles.radioGroup}>
               <TouchableOpacity
-                style={[styles.radioButton, gender === 'male' && styles.radioButtonActive]}
+                style={[styles.radioButton, gender === 'male' && styles.radioButtonActive, styles.radioButtonFirst]}
                 onPress={() => setGender('male')}
               >
                 <Text style={[styles.radioText, gender === 'male' && styles.radioTextActive]}>
@@ -141,7 +141,7 @@ export default function OnboardingScreen({ navigation }: any) {
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.goalButton, goal === 'gain' && styles.goalButtonActive]}
+                style={[styles.goalButton, goal === 'gain' && styles.goalButtonActive, styles.goalButtonLast]}
                 onPress={() => setGoal('gain')}
               >
                 <Text style={[styles.goalText, goal === 'gain' && styles.goalTextActive]}>
@@ -151,7 +151,7 @@ export default function OnboardingScreen({ navigation }: any) {
             </View>
 
             <TouchableOpacity onPress={save} style={styles.button}>
-              <Text style={styles.buttonText}>شروع سالم و های‌تک ✨</Text>
+              <Text style={styles.buttonText}>شروع کالری شمار ✨</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -216,7 +216,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     width: '100%',
     justifyContent: 'flex-end',
-    gap: 12,
   },
   radioButton: {
     paddingVertical: 12,
@@ -227,6 +226,10 @@ const styles = StyleSheet.create({
     borderColor: '#E8F8F5',
     minWidth: 100,
     alignItems: 'center',
+    marginLeft: 12,
+  },
+  radioButtonFirst: {
+    marginLeft: 0,
   },
   radioButtonActive: {
     backgroundColor: '#00D9A5',
@@ -242,7 +245,6 @@ const styles = StyleSheet.create({
   },
   goalGroup: {
     width: '100%',
-    gap: 12,
   },
   goalButton: {
     width: '100%',
@@ -253,6 +255,10 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#E8F8F5',
     alignItems: 'flex-end',
+    marginBottom: 12,
+  },
+  goalButtonLast: {
+    marginBottom: 0,
   },
   goalButtonActive: {
     backgroundColor: '#00D9A5',
