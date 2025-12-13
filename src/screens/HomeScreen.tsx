@@ -281,7 +281,7 @@ const HomeScreen: React.FC = () => {
             try {
               const conv = await GroqService.convertUnits(foodInput, qty, unit || 'عدد', matched.unit || '100 گرم');
               if (conv && conv.conversion_factor) {
-                itemCal = conv.conversion_factor * (matched.calories_per_unit || 0);
+                itemCal = qty * conv.conversion_factor * (matched.calories_per_unit || 0);
               } else {
                 itemCal = qty * (matched.calories_per_unit || 0);
               }
