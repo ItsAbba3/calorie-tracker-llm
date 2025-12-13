@@ -12,6 +12,7 @@ import OnboardingScreen from './src/screens/OnboardingScreen';
 import HomeScreen from './src/screens/HomeScreen';
 import HistoryScreen from './src/screens/HistoryScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 I18nManager.allowRTL(true);
 I18nManager.forceRTL(true);
@@ -21,6 +22,8 @@ const Tab = createBottomTabNavigator();
 
 // Bottom Tab Navigator برای صفحات اصلی
 function MainTabs() {
+  const insets = useSafeAreaInsets();
+
   return (
     <Tab.Navigator
       screenOptions={{
@@ -31,8 +34,10 @@ function MainTabs() {
           backgroundColor: '#FFFFFF',
           borderTopWidth: 1,
           borderTopColor: '#E8F8F5',
-          height: 60,
-          paddingBottom: 8,
+
+          // 👇 مهم‌ترین بخش
+          height: 60 + insets.bottom,
+          paddingBottom: insets.bottom > 0 ? insets.bottom : 8,
           paddingTop: 8,
         },
         tabBarLabelStyle: {

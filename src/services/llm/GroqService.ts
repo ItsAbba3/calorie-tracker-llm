@@ -1,25 +1,124 @@
-// src/services/llm/GroqService.ts
 import OpenAI from 'openai';
 import ConfigService from '../config/ConfigService';
-import * as Notifications from 'expo-notifications';
 
-interface DetectedFood {
+/* =========================
+   Types
+========================= */
+
+export interface DetectedFood {
   food: string;
-  quantity: number;
-  unit: string;
-  confidence?: number;
+  quantity: number;            // quantity in USER units
+  unit: string;                // user unit (normalized)
+  unit_normalized: string;     // DB serving unit (exact from foods.unit)
+  confidence: number;          // 0..1
+  approximate: boolean;
+  needs_unit_conversion: boolean;
 }
 
-interface SQLQueryResult {
+export interface SQLQueryResult {
   sql_query: string;
   detected_items: DetectedFood[];
-  explanation?: string;
-}
-
-interface UnitConversion {
-  conversion_factor: number;
   explanation: string;
 }
+
+export interface UnitConversion {
+  conversion_factor: number | null; // quantity_db = quantity_user * conversion_factor
+  approximate: boolean;
+  explanation: string;
+  example_mapping: string[];
+}
+
+/* =========================
+   Prompt Constants
+========================= */
+
+const SYSTEM_PARSE_TO_SQL = `
+تو یک مبدل متن فارسی به دادهٔ ساخت‌یافته و SQL برای اپلیکیشن ثبت کالری هستی.
+
+قوانین سخت (باید دقیق اجرا شوند):
+1) فقط JSON خالص خروجی بده؛ هیچ متن اضافه، Markdown، توضیح یا کامنتی ننویس.
+2) ساختار دیتابیس فقط و فقط این است:
+   - foods(name, calories_per_unit, unit, category, protein, carbs, fat)
+   - meal_entries(user_id, food_name, quantity, unit, total_calories, raw_input, date, time)
+3) unit در جدول foods «واحد سروینگ» است؛ نه واحد پایه.
+4) quantity در SQL یعنی «تعداد سروینگ دیتابیس».
+5) تو اجازه نداری تبدیل واحد انجام بدهی.
+6) اگر واحد کاربر دقیقاً معادل unit دیتابیس نیست → needs_unit_conversion = true
+7) نام غذا فقط باید از لیست foods داده‌شده انتخاب شود (یا نزدیک‌ترین تطابق با confidence کمتر).
+8) اگر غذا در لیست نبود، آن را در detected_items بیاور ولی SQL برایش نساز.
+9) اعداد کلمه‌ای را به عدد اعشاری تبدیل کن (نصف=0.5، یک و نیم=1.5).
+10) بازه‌ها را به مقدار میانی تبدیل کن و approximate=true.
+11) SQL باید سازگار با SQLite باشد و مجموع کالری را برگرداند.
+
+فرمت خروجی دقیقاً:
+{
+  "sql_query": "string",
+  "detected_items": [
+    {
+      "food": "string",
+      "quantity": number,
+      "unit": "string",
+      "unit_normalized": "string",
+      "confidence": number,
+      "approximate": boolean,
+      "needs_unit_conversion": boolean
+    }
+  ],
+  "explanation": "string"
+}
+`;
+
+const SYSTEM_CONVERT_UNITS = `
+تو یک ماشین حساب تبدیل واحد برای اپلیکیشن تغذیه هستی.
+
+قوانین:
+1) conversion_factor عددی است که:
+   quantity_in_db = user_quantity × conversion_factor
+2) unit دیتابیس همیشه یک سروینگ تعریف‌شده است (opaque).
+3) اگر واحد کاربر معادل همان سروینگ دیتابیس است → conversion_factor = 1
+4) اگر تبدیل تقریبی است → approximate=true و گرد کردن تا 2 رقم اعشار
+5) اگر تبدیل منطقی ممکن نیست → conversion_factor = null
+6) فقط JSON خالص خروجی بده.
+
+فرمت خروجی:
+{
+  "conversion_factor": number | null,
+  "approximate": boolean,
+  "explanation": "string",
+  "example_mapping": ["string"]
+}
+`;
+
+const SYSTEM_SUGGEST_MEALS = `
+تو یک متخصص تغذیه هستی. فقط JSON خالص بده.
+
+فرمت:
+{
+  "suggestions": [
+    {
+      "title": "string",
+      "description": "string",
+      "estimated_calories": number,
+      "macros": { "protein": number, "carbs": number, "fat": number }
+    }
+  ]
+}
+`;
+
+const SYSTEM_ANALYZE_PATTERN = `
+تو یک تحلیلگر الگوی مصرف غذایی هستی.
+فقط JSON خالص بده.
+
+فرمت:
+{
+  "insights": ["string"],
+  "recommendations": ["string"]
+}
+`;
+
+/* =========================
+   Service
+========================= */
 
 class GroqService {
   private client: OpenAI | null = null;
@@ -29,296 +128,176 @@ class GroqService {
 
     const apiKey = await ConfigService.getStoredGroqApiKey();
     if (!apiKey) {
-      throw new Error('Groq API key is not set. Please configure it in settings.');
+      throw new Error('Groq API key is not set.');
     }
 
     this.client = new OpenAI({
-      apiKey: apiKey,
+      apiKey,
       baseURL: 'https://api.groq.com/openai/v1',
       dangerouslyAllowBrowser: true,
     });
   }
 
-  /**
-   * تبدیل متن ورودی کاربر به SQL Query
-   */
+  /* =========================
+     Helpers
+  ========================= */
+
+  private cleanJSON(text: string): string {
+    return text
+      .replace(/```json/g, '')
+      .replace(/```/g, '')
+      .trim();
+  }
+
+  /* =========================
+     1) Parse user input → SQL
+  ========================= */
+
   async parseUserInputToSQL(
     userInput: string,
     availableFoods: Array<{ name: string; unit: string; calories_per_unit: number }>
   ): Promise<SQLQueryResult> {
     const foodsList = availableFoods
-      .map(f => `- ${f.name} (${f.calories_per_unit} کالری/${f.unit})`)
+      .map(f => `- ${f.name} (${f.calories_per_unit} کالری / ${f.unit})`)
       .join('\n');
 
-    const prompt = `
-تو یک متخصص تجزیه متن و SQL هستی. من یک دیتابیس SQLite دارم با جدول foods که شامل غذاهای زیر است:
-
+    const userPrompt = `
+لیست غذاهای موجود در دیتابیس:
 ${foodsList}
 
-توجه مهم: اسکیمای دیتابیس (از این نام‌ها دقیقاً استفاده کن):
-- جدول foods: (name, calories_per_unit, unit, category, protein, carbs, fat)
-- جدول meal_entries: (user_id, food_name, quantity, unit, total_calories, raw_input, date, time)
-
-قواعد اضافه:
-+- برای کالریِ واحدی از نام ستون 'calories_per_unit' استفاده کن (مثلاً 'foods.calories_per_unit' یا 'T1.calories_per_unit').
-+- نامِ ستونِ نام غذا در جدول وعده‌ها 'food_name' است؛ 'foodname' یا 'foodName' نزن.
-+- خروجی SQL باید یک عدد (مجموع کالری‌ها) برگرداند با نامی مثل 'total_calories' یا فقط مقدار اول.
-+- اگر از ALIAS استفاده می‌کنی، از ستون‌های واقعی بالا استفاده کن (مثال: 'T1.calories_per_unit').
-
-کاربر این متن را وارد کرده:
+متن کاربر:
 "${userInput}"
 
-وظایف تو:
-1. غذاهای ذکر شده را شناسایی کن (نام دقیق از لیست بالا)
-2. مقدار و واحد هر غذا را استخراج کن
-3. یک SQL query بنویس که کل کالری را محاسبه کند و از نام ستون‌های دقیق استفاده کند
-
-مثال SQL خروجی (نمونه، برای الگو):
-SELECT SUM(T1.quantity * T1.calories_per_unit) AS total_calories
-FROM (
-  SELECT foods.calories_per_unit, ? AS quantity
-  FROM foods
-  WHERE foods.name = 'نان'
-) AS T1;
-
-فرمت خروجی (JSON خالص بدون markdown):
-{
-  "sql_query": "SELECT ...",
-  "detected_items": [
-    {"food": "نام غذا", "quantity": 1.5, "unit": "واحد", "confidence": 0.95}
-  ],
-  "explanation": "توضیح کوتاه"
-}
+وظیفه:
+- غذاها را تشخیص بده
+- مقدار و واحد را استخراج کن
+- unit دیتابیس را بدون تغییر در unit_normalized قرار بده
+- اگر واحد کاربر دقیقاً معادل unit دیتابیس نیست → needs_unit_conversion=true
+- فقط برای غذاهای معتبر SQL بساز
+- خروجی فقط JSON باشد
 `;
 
-    // Note: explicitly provide schema/column names so the model uses the exact column names
-    // available in the app's SQLite schema. This reduces column-name mismatches like "foodname".
-    // tables:
-    // - foods(name, calories_per_unit, unit, category, protein, carbs, fat)
-    // - meal_entries(food_name, quantity, unit, total_calories, raw_input, date, time, user_id)
-    // Instruct the model to use these exact names (use `name` for foods, `food_name` for meal entries).
+    await this.ensureClient();
 
-    try {
-      await this.ensureClient();
-      const completion = await (this.client as OpenAI).chat.completions.create({
-        model: 'llama-3.3-70b-versatile', // مدل قوی و سریع
-        messages: [
-          {
-            role: 'system',
-            content: 'تو یک دستیار تغذیه هوشمند هستی که متن فارسی را به SQL تبدیل می‌کنی. فقط JSON بده، بدون markdown.'
-          },
-          {
-            role: 'user',
-            content: prompt
-          }
-        ],
-        temperature: 0.3, // کم تا دقت بیشتر باشد
-        max_tokens: 1000,
-      });
+    const completion = await this.client!.chat.completions.create({
+      model: 'llama-3.3-70b-versatile',
+      messages: [
+        { role: 'system', content: SYSTEM_PARSE_TO_SQL },
+        { role: 'user', content: userPrompt }
+      ],
+      temperature: 0.2,
+      max_tokens: 1000,
+    });
 
-      const responseText = completion.choices[0].message.content?.trim() || '{}';
-      
-      // پاکسازی markdown اگر وجود داشت
-      const jsonText = responseText
-        .replace(/```json\n?/g, '')
-        .replace(/```\n?/g, '')
-        .trim();
-
-      const result: SQLQueryResult = JSON.parse(jsonText);
-      
-      console.log('✅ Groq parsed input:', result);
-      return result;
-
-    } catch (error) {
-      console.error('❌ Groq API error:', error);
-      throw new Error('خطا در پردازش متن. لطفاً دوباره تلاش کنید.');
-    }
+    const raw = completion.choices[0].message.content || '{}';
+    return JSON.parse(this.cleanJSON(raw));
   }
 
-  /**
-   * تبدیل واحد کاربر به واحد دیتابیس
-   */
+  /* =========================
+     2) Convert Units
+  ========================= */
+
   async convertUnits(
     userInput: string,
     userQuantity: number,
     userUnit: string,
     dbUnit: string
   ): Promise<UnitConversion> {
-    const prompt = `
-کاربر گفته: "${userInput}"
-مقدار کاربر: ${userQuantity} ${userUnit}
-واحد دیتابیس: ${dbUnit}
+    const userPrompt = `
+متن کاربر:
+"${userInput}"
+
+مقدار و واحد کاربر:
+${userQuantity} ${userUnit}
+
+واحد سروینگ دیتابیس:
+${dbUnit}
 
 ضریب تبدیل را محاسبه کن.
-
-مثال‌ها:
-- کاربر: "1 نان" → DB: "¼ نان" → ضریب: 4
-- کاربر: "0.5 لیوان" → DB: "لیوان" → ضریب: 0.5
-- کاربر: "2 قاشق" → DB: "قاشق غذاخوری" → ضریب: 2
-
-فرمت JSON (بدون markdown):
-{
-  "conversion_factor": 4.0,
-  "explanation": "یک نان کامل برابر است با 4 × ¼ نان"
-}
 `;
 
-    try {
-      await this.ensureClient();
-      const completion = await (this.client as OpenAI).chat.completions.create({
-        model: 'llama-3.3-70b-versatile',
-        messages: [
-          {
-            role: 'system',
-            content: 'تو یک ماشین حساب واحدها هستی. فقط JSON بده.'
-          },
-          {
-            role: 'user',
-            content: prompt
-          }
-        ],
-        temperature: 0.1,
-        max_tokens: 300,
-      });
+    await this.ensureClient();
 
-      const responseText = completion.choices[0].message.content?.trim() || '{}';
-      const jsonText = responseText
-        .replace(/```json\n?/g, '')
-        .replace(/```\n?/g, '')
-        .trim();
+    const completion = await this.client!.chat.completions.create({
+      model: 'llama-3.3-70b-versatile',
+      messages: [
+        { role: 'system', content: SYSTEM_CONVERT_UNITS },
+        { role: 'user', content: userPrompt }
+      ],
+      temperature: 0.1,
+      max_tokens: 300,
+    });
 
-      const result: UnitConversion = JSON.parse(jsonText);
-      
-      console.log('✅ Unit conversion:', result);
-      return result;
-
-    } catch (error) {
-      console.error('❌ Unit conversion error:', error);
-      // fallback: اگر خطا بود، از همان مقدار کاربر استفاده کن
-      return {
-        conversion_factor: userQuantity,
-        explanation: 'استفاده از مقدار پیش‌فرض'
-      };
-    }
+    const raw = completion.choices[0].message.content || '{}';
+    return JSON.parse(this.cleanJSON(raw));
   }
 
-  /**
-   * پیشنهاد غذاهای سالم بر اساس پروفایل کاربر
-   */
+  /* =========================
+     3) Suggest Meals
+  ========================= */
+
   async suggestHealthyMeals(
     goal: string,
     remainingCalories: number,
     currentMacros: { protein: number; carbs: number; fat: number }
-  ): Promise<string[]> {
-    const prompt = `
-کاربر هدف "${goal}" دارد و امروز ${remainingCalories} کالری باقی‌مانده.
-ماکروهای فعلی: پروتئین ${currentMacros.protein}g، کربوهیدرات ${currentMacros.carbs}g، چربی ${currentMacros.fat}g
-
-3 پیشنهاد غذایی سالم و متعادل بده.
-
-فرمت JSON (بدون markdown):
-{
-  "suggestions": [
-    "پیشنهاد 1",
-    "پیشنهاد 2",
-    "پیشنهاد 3"
-  ]
-}
+  ): Promise<any[]> {
+    const userPrompt = `
+هدف کاربر: ${goal}
+کالری باقی‌مانده: ${remainingCalories}
+ماکروهای فعلی:
+پروتئین ${currentMacros.protein}g
+کربوهیدرات ${currentMacros.carbs}g
+چربی ${currentMacros.fat}g
 `;
 
-    try {
-      await this.ensureClient();
-      const completion = await (this.client as OpenAI).chat.completions.create({
-        model: 'llama-3.3-70b-versatile',
-        messages: [
-          {
-            role: 'system',
-            content: 'تو یک متخصص تغذیه هستی که پیشنهادات شخصی‌سازی شده می‌دهی.'
-          },
-          {
-            role: 'user',
-            content: prompt
-          }
-        ],
-        temperature: 0.7,
-        max_tokens: 500,
-      });
+    await this.ensureClient();
 
-      const responseText = completion.choices[0].message.content?.trim() || '{}';
-      const jsonText = responseText
-        .replace(/```json\n?/g, '')
-        .replace(/```\n?/g, '')
-        .trim();
+    const completion = await this.client!.chat.completions.create({
+      model: 'llama-3.3-70b-versatile',
+      messages: [
+        { role: 'system', content: SYSTEM_SUGGEST_MEALS },
+        { role: 'user', content: userPrompt }
+      ],
+      temperature: 0.7,
+      max_tokens: 500,
+    });
 
-      const result = JSON.parse(jsonText);
-      return result.suggestions || [];
-
-    } catch (error) {
-      console.error('❌ Suggestion error:', error);
-      return [
-        'سالاد سبزیجات با سینه مرغ',
-        'ماست و میوه',
-        'تخم مرغ آب پز با نان کامل'
-      ];
-    }
+    const raw = completion.choices[0].message.content || '{}';
+    return JSON.parse(this.cleanJSON(raw)).suggestions || [];
   }
 
-  /**
-   * تحلیل هوشمند الگوی مصرف کاربر
-   */
+  /* =========================
+     4) Analyze Eating Pattern
+  ========================= */
+
   async analyzeEatingPattern(
     weeklyData: Array<{ date: string; total_calories: number; meals: number }>
-  ): Promise<{
-    insights: string[];
-    recommendations: string[];
-  }> {
-    const dataText = weeklyData
-      .map(d => `${d.date}: ${d.total_calories} کالری در ${d.meals} وعده`)
+  ): Promise<{ insights: string[]; recommendations: string[] }> {
+    const text = weeklyData
+      .map(d => `${d.date}: ${d.total_calories} کالری، ${d.meals} وعده`)
       .join('\n');
 
-    const prompt = `
-داده‌های هفتگی کاربر:
-${dataText}
+    const userPrompt = `
+داده‌های هفتگی:
+${text}
 
-تحلیل کن:
-1. الگوی مصرف کالری (منظم/نامنظم)
-2. تعداد وعده‌های غذایی
-3. روزهای کم‌کالری/پرکالری
-
-فرمت JSON (بدون markdown):
-{
-  "insights": ["بینش 1", "بینش 2"],
-  "recommendations": ["توصیه 1", "توصیه 2"]
-}
+تحلیل کن.
 `;
 
-    try {
-      await this.ensureClient();
-      const completion = await (this.client as OpenAI).chat.completions.create({
-        model: 'llama-3.3-70b-versatile',
-        messages: [
-          { role: 'system', content: 'تو یک تحلیلگر داده‌های تغذیه هستی.' },
-          { role: 'user', content: prompt }
-        ],
-        temperature: 0.5,
-        max_tokens: 800,
-      });
+    await this.ensureClient();
 
-      const responseText = completion.choices[0].message.content?.trim() || '{}';
-      const jsonText = responseText
-        .replace(/```json\n?/g, '')
-        .replace(/```\n?/g, '')
-        .trim();
+    const completion = await this.client!.chat.completions.create({
+      model: 'llama-3.3-70b-versatile',
+      messages: [
+        { role: 'system', content: SYSTEM_ANALYZE_PATTERN },
+        { role: 'user', content: userPrompt }
+      ],
+      temperature: 0.4,
+      max_tokens: 600,
+    });
 
-      return JSON.parse(jsonText);
-
-    } catch (error) {
-      console.error('❌ Analysis error:', error);
-      return {
-        insights: ['داده کافی برای تحلیل وجود ندارد'],
-        recommendations: ['ادامه ثبت منظم وعده‌های غذایی']
-      };
-    }
+    const raw = completion.choices[0].message.content || '{}';
+    return JSON.parse(this.cleanJSON(raw));
   }
 }
 

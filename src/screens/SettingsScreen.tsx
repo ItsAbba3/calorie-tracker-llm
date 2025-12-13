@@ -361,6 +361,7 @@ const SettingsScreen: React.FC = () => {
           <Text style={styles.aboutDesc}>
             این اپلیکیشن با استفاده از هوش مصنوعی ساخته شده است.
             تمام داده‌های شما به صورت محلی در دستگاهتان ذخیره می‌شود.
+            سازنده: @itsabba3
           </Text>
         </View>
       </View>

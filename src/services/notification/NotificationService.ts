@@ -1,18 +1,30 @@
-// src/services/notification/NotificationService.ts - EXPO VERSION
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
 import { Platform } from 'react-native';
 import moment from 'moment-jalaali';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import DatabaseService from '../database/DatabaseService';
 
-// تنظیمات پیش‌فرض نمایش نوتیفیکیشن
+/* =========================
+   Notification Handler
+========================= */
+
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true,
     shouldPlaySound: true,
-    shouldSetBadge: true,
+    shouldSetBadge: false,
   }),
 });
+
+const STORAGE_KEYS = {
+  LAST_MOTIVATION: 'LAST_MOTIVATION_NOTIFICATION',
+  LAST_MISSING: 'LAST_MISSING_NOTIFICATION',
+};
+
+/* =========================
+   Service
+========================= */
 
 class NotificationService {
   private notificationListener: any = null;
@@ -23,92 +35,65 @@ class NotificationService {
     this.setupNotificationListeners();
   }
 
-  private async registerForPushNotifications(): Promise<string | undefined> {
-    let token;
+  /* =========================
+     Permissions
+  ========================= */
 
+  private async registerForPushNotifications(): Promise<void> {
     if (Platform.OS === 'android') {
       await Notifications.setNotificationChannelAsync('calorie-tracker', {
         name: 'یادآوری وعده غذایی',
         importance: Notifications.AndroidImportance.MAX,
-        vibrationPattern: [0, 250, 250, 250],
-        lightColor: '#4361EE',
       });
     }
 
-    if (Device.isDevice) {
-      const { status: existingStatus } = await Notifications.getPermissionsAsync();
-      let finalStatus = existingStatus;
-      
-      if (existingStatus !== 'granted') {
-        const { status } = await Notifications.requestPermissionsAsync();
-        finalStatus = status;
-      }
-      
-      if (finalStatus !== 'granted') {
-        console.log('❌ Permission not granted for notifications');
-        return;
-      }
-      
-      console.log('✅ Notification permissions granted');
-    }
+    if (!Device.isDevice) return;
 
-    return token;
+    const { status } = await Notifications.getPermissionsAsync();
+    if (status !== 'granted') {
+      const req = await Notifications.requestPermissionsAsync();
+      if (req.status !== 'granted') {
+        console.log('❌ Notification permission denied');
+      }
+    }
   }
+
+  /* =========================
+     Listeners
+  ========================= */
 
   private setupNotificationListeners(): void {
-    // وقتی نوتیفیکیشن دریافت می‌شود (اپ باز است)
-    this.notificationListener = Notifications.addNotificationReceivedListener(notification => {
-      console.log('📩 Notification received:', notification);
-    });
+    this.notificationListener =
+      Notifications.addNotificationReceivedListener(() => {});
 
-    // وقتی کاربر روی نوتیفیکیشن کلیک می‌کند
-    this.responseListener = Notifications.addNotificationResponseReceivedListener(response => {
-      console.log('👆 Notification tapped:', response);
-    });
+    this.responseListener =
+      Notifications.addNotificationResponseReceivedListener(() => {});
   }
+
+  /* =========================
+     Fixed Daily Reminders
+  ========================= */
 
   async scheduleFixedReminders(times: {
     breakfast?: string;
     lunch?: string;
     dinner?: string;
   }): Promise<void> {
-    // حذف یادآوری‌های قبلی
     await this.cancelAllReminders();
 
     const reminders = [
-      { 
-        id: 'breakfast-reminder', 
-        time: times.breakfast, 
-        title: '🌅 صبحانه', 
-        body: 'وقت صبحانه است! غذایت را ثبت کن' 
-      },
-      { 
-        id: 'lunch-reminder', 
-        time: times.lunch, 
-        title: '☀️ ناهار', 
-        body: 'نهار خوردی؟ کالری‌هایت را ثبت کن' 
-      },
-      { 
-        id: 'dinner-reminder', 
-        time: times.dinner, 
-        title: '🌙 شام', 
-        body: 'شام خوردی؟ فراموش نکن ثبت کنی' 
-      },
+      { time: times.breakfast, title: '🌅 صبحانه', body: 'صبحانه‌ات رو ثبت کن' },
+      { time: times.lunch, title: '☀️ ناهار', body: 'وقت ثبت ناهاره' },
+      { time: times.dinner, title: '🌙 شام', body: 'شامت رو ثبت کن' },
     ];
 
-    for (const reminder of reminders) {
-      if (!reminder.time) continue;
+    for (const r of reminders) {
+      if (!r.time) continue;
 
-      const [hour, minute] = reminder.time.split(':').map(Number);
-      
+      const [hour, minute] = r.time.split(':').map(Number);
+
       await Notifications.scheduleNotificationAsync({
-        identifier: reminder.id,
-        content: {
-          title: reminder.title,
-          body: reminder.body,
-          data: { type: 'meal-reminder' },
-          sound: true,
-        },
+        content: { title: r.title, body: r.body },
         trigger: {
           hour,
           minute,
@@ -116,176 +101,82 @@ class NotificationService {
         },
       });
     }
-
-    console.log('✅ Fixed reminders scheduled');
   }
 
-  async scheduleSmartReminders(userId: number): Promise<void> {
-    try {
-      const endDate = moment().format('jYYYY/jMM/jDD');
-      const startDate = moment().subtract(7, 'days').format('jYYYY/jMM/jDD');
-      
-      const weeklyStats = await DatabaseService.getWeeklyStats(userId, startDate, endDate);
-      
-      if (weeklyStats.length === 0) {
-        await this.scheduleFixedReminders({
-          breakfast: '08:00',
-          lunch: '13:00',
-          dinner: '20:00',
-        });
-        return;
-      }
+  /* =========================
+     Missing Data Reminder
+  ========================= */
 
-      const mealTimes: string[] = [];
-      
-      for (const day of weeklyStats) {
-        const meals = await DatabaseService.getMealsForDate(userId, day.date);
-        mealTimes.push(...meals.map(m => m.time));
-      }
+  async scheduleMissingDataReminder(): Promise<void> {
+    const today = moment().format('YYYY-MM-DD');
+    const last = await AsyncStorage.getItem(STORAGE_KEYS.LAST_MISSING);
 
-      const morningMeals = mealTimes.filter(t => {
-        const hour = parseInt(t.split(':')[0]);
-        return hour >= 6 && hour < 11;
-      });
+    if (last === today) return;
 
-      const afternoonMeals = mealTimes.filter(t => {
-        const hour = parseInt(t.split(':')[0]);
-        return hour >= 11 && hour < 16;
-      });
+    const triggerDate = moment().hour(21).minute(0).second(0);
 
-      const eveningMeals = mealTimes.filter(t => {
-        const hour = parseInt(t.split(':')[0]);
-        return hour >= 16 && hour < 23;
-      });
+    if (triggerDate.isBefore(moment())) return;
 
-      const avgBreakfast = this.calculateAverageTime(morningMeals) || '08:00';
-      const avgLunch = this.calculateAverageTime(afternoonMeals) || '13:00';
-      const avgDinner = this.calculateAverageTime(eveningMeals) || '20:00';
-
-      await this.scheduleFixedReminders({
-        breakfast: avgBreakfast,
-        lunch: avgLunch,
-        dinner: avgDinner,
-      });
-
-      console.log('✅ Smart reminders scheduled:', { avgBreakfast, avgLunch, avgDinner });
-
-    } catch (error) {
-      console.error('Smart reminder error:', error);
-      await this.scheduleFixedReminders({
-        breakfast: '08:00',
-        lunch: '13:00',
-        dinner: '20:00',
-      });
-    }
-  }
-
-  private calculateAverageTime(times: string[]): string | null {
-    if (times.length === 0) return null;
-
-    const totalMinutes = times.reduce((sum, time) => {
-      const [hour, minute] = time.split(':').map(Number);
-      return sum + (hour * 60 + minute);
-    }, 0);
-
-    const avgMinutes = Math.round(totalMinutes / times.length);
-    const hour = Math.floor(avgMinutes / 60);
-    const minute = avgMinutes % 60;
-
-    return `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
-  }
-
-  async sendMotivationalNotification(
-    progress: number,
-    streakDays: number
-  ): Promise<void> {
-    let title = '';
-    let body = '';
-
-    if (progress >= 90 && progress < 110) {
-      title = '🎯 عالی!';
-      body = `امروز ${Math.round(progress)}٪ هدفت رو کامل کردی!`;
-    } else if (streakDays >= 7) {
-      title = '🔥 استقامت فوق‌العاده!';
-      body = `${streakDays} روز متوالی ثبت غذا! ادامه بده!`;
-    } else if (progress > 110) {
-      title = '⚠️ هشدار';
-      body = 'امروز بیش از حد کالری مصرف کردی';
-    } else {
-      return;
-    }
-
-    await Notifications.scheduleNotificationAsync({
-      content: {
-        title,
-        body,
-        data: { type: 'motivational' },
-      },
-      trigger: null, // فوری
-    });
-  }
-
-  async sendMissingDataReminder(): Promise<void> {
     await Notifications.scheduleNotificationAsync({
       content: {
         title: '📝 یادت نره!',
         body: 'امروز هنوز غذایی ثبت نکردی',
-        data: { type: 'missing-data' },
       },
-      trigger: null,
+      trigger: triggerDate.toDate(),
     });
+
+    await AsyncStorage.setItem(STORAGE_KEYS.LAST_MISSING, today);
   }
+
+  /* =========================
+     Motivational Notification
+  ========================= */
+
+  async scheduleMotivationalNotification(
+    progress: number,
+    streakDays: number
+  ): Promise<void> {
+    const today = moment().format('YYYY-MM-DD');
+    const last = await AsyncStorage.getItem(STORAGE_KEYS.LAST_MOTIVATION);
+
+    if (last === today) return;
+
+    let title = '';
+    let body = '';
+
+    if (progress >= 90 && progress <= 110) {
+      title = '🎯 عالی!';
+      body = 'امروز خیلی خوب عمل کردی!';
+    } else if (streakDays >= 7) {
+      title = '🔥 فوق‌العاده!';
+      body = `${streakDays} روز پشت سر هم!`;
+    } else {
+      return;
+    }
+
+    const triggerDate = moment().add(1, 'minute');
+
+    await Notifications.scheduleNotificationAsync({
+      content: { title, body },
+      trigger: triggerDate.toDate(),
+    });
+
+    await AsyncStorage.setItem(STORAGE_KEYS.LAST_MOTIVATION, today);
+  }
+
+  /* =========================
+     Cleanup
+  ========================= */
 
   async cancelAllReminders(): Promise<void> {
     await Notifications.cancelAllScheduledNotificationsAsync();
-    console.log('✅ All reminders cancelled');
-  }
-
-  async checkAndSendDailyReminders(userId: number): Promise<void> {
-    const today = moment().format('jYYYY/jMM/jDD');
-    const meals = await DatabaseService.getMealsForDate(userId, today);
-
-    if (meals.length === 0 && moment().hour() >= 21) {
-      await this.sendMissingDataReminder();
-    }
-
-    const profile = await DatabaseService.getUserProfile();
-    if (profile) {
-      const totalCalories = meals.reduce((sum, m) => sum + m.total_calories, 0);
-      const progress = (totalCalories / profile.daily_calorie_target) * 100;
-
-      const streak = await this.calculateStreak(userId);
-
-      await this.sendMotivationalNotification(progress, streak);
-    }
-  }
-
-  private async calculateStreak(userId: number): Promise<number> {
-    let streak = 0;
-    let currentDate = moment();
-
-    while (true) {
-      const dateStr = currentDate.format('jYYYY/jMM/jDD');
-      const meals = await DatabaseService.getMealsForDate(userId, dateStr);
-
-      if (meals.length === 0) break;
-
-      streak++;
-      currentDate = currentDate.subtract(1, 'day');
-
-      if (streak > 100) break;
-    }
-
-    return streak;
   }
 
   cleanup(): void {
-    if (this.notificationListener) {
+    if (this.notificationListener)
       Notifications.removeNotificationSubscription(this.notificationListener);
-    }
-    if (this.responseListener) {
+    if (this.responseListener)
       Notifications.removeNotificationSubscription(this.responseListener);
-    }
   }
 }
 
