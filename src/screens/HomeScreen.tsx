@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
   Alert,
   Modal,
+  Image,
 } from 'react-native';
 import { BarChart } from 'react-native-chart-kit';
 import { Dimensions } from 'react-native';
@@ -272,23 +273,46 @@ const HomeScreen: React.FC = () => {
         const matched = findFoodMatch(detectedName);
         let itemCal = 0;
 
-        if (matched) {
-          if (unit && matched.unit && unit === matched.unit) {
-            itemCal = qty * (matched.calories_per_unit || 0);
-          } else if (unit && matched.unit && unit.includes(matched.unit)) {
-            itemCal = qty * (matched.calories_per_unit || 0);
+        if (matched && matched.calories_per_unit > 0) {
+          // اگر واحد دقیقاً یکسان است
+          if (unit && matched.unit && (unit === matched.unit || unit.includes(matched.unit) || matched.unit.includes(unit))) {
+            itemCal = qty * matched.calories_per_unit;
           } else {
+            // تلاش برای تبدیل واحد
             try {
               const conv = await GroqService.convertUnits(foodInput, qty, unit || 'عدد', matched.unit || '100 گرم');
-              if (conv && conv.conversion_factor) {
-                itemCal = qty * conv.conversion_factor * (matched.calories_per_unit || 0);
+              if (conv && conv.conversion_factor && conv.conversion_factor > 0) {
+                itemCal = qty * conv.conversion_factor * matched.calories_per_unit;
               } else {
-                itemCal = qty * (matched.calories_per_unit || 0);
+                // اگر تبدیل واحد موفق نبود، از واحد دیتابیس استفاده کن
+                itemCal = qty * matched.calories_per_unit;
               }
             } catch (e) {
               console.warn('Unit conversion failed:', e);
-              itemCal = qty * (matched.calories_per_unit || 0);
+              // در صورت خطا، از واحد دیتابیس استفاده کن
+              itemCal = qty * matched.calories_per_unit;
             }
+          }
+        } else if (matched && matched.calories_per_unit === 0) {
+          console.warn(`Food "${detectedName}" found but calories_per_unit is 0`);
+        } else {
+          console.warn(`Food "${detectedName}" not found in database`);
+        }
+
+        // اگر هنوز کالری 0 است و SQL query داریم، از آن استفاده کن
+        if (itemCal === 0 && parseResult.sql_query) {
+          try {
+            // ساخت SQL query برای این غذا خاص
+            const foodSql = parseResult.sql_query.replace(
+              /WHERE.*/i,
+              `WHERE food_name LIKE '%${detectedName.replace(/'/g, "''")}%'`
+            );
+            const sqlCal = await DatabaseService.executeCalorieQuery(foodSql);
+            if (sqlCal > 0) {
+              itemCal = sqlCal;
+            }
+          } catch (e) {
+            console.warn('Individual SQL calorie query failed:', e);
           }
         }
 
@@ -296,9 +320,18 @@ const HomeScreen: React.FC = () => {
         totalCalories += itemCal;
       }
 
+      // اگر کل کالری هنوز 0 است و SQL query کلی داریم، از آن استفاده کن
       if (totalCalories === 0 && parseResult.sql_query) {
         try {
-          totalCalories = await DatabaseService.executeCalorieQuery(parseResult.sql_query);
+          const sqlTotal = await DatabaseService.executeCalorieQuery(parseResult.sql_query);
+          if (sqlTotal > 0) {
+            totalCalories = sqlTotal;
+            // تقسیم کالری بین آیتم‌ها به صورت مساوی
+            const perItem = sqlTotal / parseResult.detected_items.length;
+            for (let i = 0; i < perItemCalories.length; i++) {
+              perItemCalories[i] = perItem;
+            }
+          }
         } catch (e) {
           console.warn('Fallback SQL calorie query failed:', e);
         }
@@ -311,13 +344,20 @@ const HomeScreen: React.FC = () => {
         const item = parseResult.detected_items[i];
         let itemCalories = perItemCalories[i] || 0;
         
+        // اگر هنوز کالری 0 است، یک بار دیگر تلاش کن
         if (itemCalories === 0) {
           const matched = findFoodMatch(item.food || '');
-          if (matched) {
+          if (matched && matched.calories_per_unit > 0) {
             const qty = item.quantity || 0;
-            itemCalories = qty * (matched.calories_per_unit || 0);
+            itemCalories = qty * matched.calories_per_unit;
+            console.log(`Recalculated calories for ${item.food}: ${itemCalories} (${qty} * ${matched.calories_per_unit})`);
+          } else {
+            console.warn(`Could not calculate calories for ${item.food}, matched:`, matched);
           }
         }
+
+        // لاگ برای دیباگ
+        console.log(`Saving meal: ${item.food}, quantity: ${item.quantity}, unit: ${item.unit}, calories: ${itemCalories}`);
 
         await DatabaseService.saveMealEntry({
           user_id: userProfile.id,
@@ -403,10 +443,19 @@ const HomeScreen: React.FC = () => {
       {/* هدر با گرادیانت */}
       <View style={styles.header}>
         <View style={styles.headerContent}>
-          <Text style={styles.headerTitle}>
-            {userProfile ? `سلام، ${userProfile.name || 'کاربر'} 👋` : 'سلام! 👋'}
-          </Text>
-          <Text style={styles.headerDate}>{moment().format('jYYYY/jMM/jDD')}</Text>
+          <View style={styles.headerTopRow}>
+            <Image 
+              source={require('../../assets/icon.png')} 
+              style={styles.logo}
+              resizeMode="contain"
+            />
+            <View style={styles.headerTextContainer}>
+              <Text style={styles.headerTitle}>
+                {userProfile ? `سلام، ${userProfile.name || 'کاربر'} 👋` : 'سلام! 👋'}
+              </Text>
+              <Text style={styles.headerDate}>{moment().format('jYYYY/jMM/jDD')}</Text>
+            </View>
+          </View>
         </View>
         <View style={styles.headerGradient} />
       </View>
@@ -663,6 +712,22 @@ const styles = StyleSheet.create({
   headerContent: {
     alignItems: 'flex-end',
     zIndex: 1,
+  },
+  headerTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    width: '100%',
+  },
+  logo: {
+    width: 50,
+    height: 50,
+    marginLeft: 12,
+    borderRadius: 25,
+  },
+  headerTextContainer: {
+    alignItems: 'flex-end',
+    flex: 1,
   },
   headerTitle: {
     fontSize: 32,
