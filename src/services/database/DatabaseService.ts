@@ -175,8 +175,10 @@ class DatabaseService {
 
   async init(): Promise<void> {
     try {
-      // باز کردن یا ایجاد دیتابیس
-      this.db = await SQLite.openDatabaseAsync('CalorieTracker.db');
+      // باز کردن یا ایجاد دیتابیس با enableChangeListener برای اطمینان از ذخیره‌سازی
+      this.db = await SQLite.openDatabaseAsync('CalorieTracker.db', {
+        enableChangeListener: true,
+      });
       console.log('Opening SQLite DB: CalorieTracker.db');
       
       await this.createTables();
@@ -194,6 +196,25 @@ class DatabaseService {
         console.warn('Migration check failed:', e);
       }
       await this.seedInitialData();
+      
+      // اطمینان از اینکه پروفایل موجود در دیتابیس بکاپ دارد
+      try {
+        const existingProfile = await this.getUserProfile();
+        if (existingProfile) {
+          await SecureStore.setItemAsync('profile_backup', JSON.stringify({
+            name: existingProfile.name || '',
+            age: existingProfile.age,
+            gender: existingProfile.gender,
+            weight: existingProfile.weight,
+            height: existingProfile.height,
+            goal: existingProfile.goal,
+            id: existingProfile.id,
+          }));
+          console.log('✅ Existing profile backed up to SecureStore');
+        }
+      } catch (e) {
+        console.warn('Failed to backup existing profile:', e);
+      }
       
       console.log('✅ Database initialized successfully');
     } catch (error) {
@@ -386,6 +407,25 @@ class DatabaseService {
     values.push(id);
 
     await this.db.runAsync(sql, ...values);
+
+    // به‌روزرسانی بکاپ در SecureStore
+    try {
+      const updatedProfile = await this.getUserProfile();
+      if (updatedProfile) {
+        await SecureStore.setItemAsync('profile_backup', JSON.stringify({
+          name: updatedProfile.name || '',
+          age: updatedProfile.age,
+          gender: updatedProfile.gender,
+          weight: updatedProfile.weight,
+          height: updatedProfile.height,
+          goal: updatedProfile.goal,
+          id: updatedProfile.id,
+        }));
+        console.log('✅ Profile backup updated in SecureStore');
+      }
+    } catch (e) {
+      console.warn('Failed to update profile backup:', e);
+    }
   }
 
   async addWeightEntry(userId: number, weight: number, date: string): Promise<number> {
@@ -525,18 +565,25 @@ class DatabaseService {
   async saveMealEntry(entry: Omit<MealEntry, 'id' | 'created_at'>): Promise<void> {
     if (!this.db) throw new Error('Database not initialized');
     console.log('Saving meal entry for user', entry.user_id, entry.food_name, entry.total_calories);
-    await this.db.runAsync(
-      `INSERT INTO meal_entries (user_id, food_name, quantity, unit, total_calories, raw_input, date, time) 
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      entry.user_id,
-      entry.food_name,
-      entry.quantity,
-      entry.unit,
-      entry.total_calories,
-      entry.raw_input,
-      entry.date,
-      entry.time
-    );
+    try {
+      await this.db.runAsync(
+        `INSERT INTO meal_entries (user_id, food_name, quantity, unit, total_calories, raw_input, date, time) 
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        entry.user_id,
+        entry.food_name,
+        entry.quantity,
+        entry.unit,
+        entry.total_calories,
+        entry.raw_input,
+        entry.date,
+        entry.time
+      );
+      // اطمینان از ذخیره‌سازی با sync
+      await this.db.execAsync('PRAGMA synchronous = FULL;');
+    } catch (error) {
+      console.error('Error saving meal entry:', error);
+      throw error;
+    }
   }
 
   async getMealsForDate(userId: number, date: string): Promise<MealEntry[]> {
